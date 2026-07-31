@@ -15,7 +15,17 @@ from google.protobuf.json_format import MessageToDict
 
 from contracts import Capability
 
-from ..agents import company_profile, company_validation, financial_analyst, news_analyst
+from ..agents import (
+    company_profile,
+    company_validation,
+    competitor_analyst,
+    earnings_analyst,
+    financial_analyst,
+    news_analyst,
+    risk_analyst,
+    sec_filings,
+    valuation_analyst,
+)
 
 # capability -> handler.
 #
@@ -32,6 +42,11 @@ CAPABILITY_HANDLERS: dict[str, Callable] = {
     Capability.FINANCIAL_STATEMENTS.value: financial_analyst.handle_statements,
     Capability.FINANCIAL_RATIOS.value: financial_analyst.handle_ratios,
     Capability.NEWS_SENTIMENT.value: news_analyst.handle,
+    Capability.SEC_FILINGS.value: sec_filings.handle,
+    Capability.COMPETITOR_ANALYSIS.value: competitor_analyst.handle,
+    Capability.VALUATION.value: valuation_analyst.handle,
+    Capability.EARNINGS_CALL.value: earnings_analyst.handle,
+    Capability.RISK_ANALYSIS.value: risk_analyst.handle,
 }
 
 # agent_id -> the capabilities that agent serves.
@@ -43,6 +58,11 @@ AGENT_CAPABILITIES: dict[str, list[str]] = {
         Capability.FINANCIAL_RATIOS.value,
     ],
     news_analyst.AGENT_ID: [Capability.NEWS_SENTIMENT.value],
+    sec_filings.AGENT_ID: [Capability.SEC_FILINGS.value],
+    competitor_analyst.AGENT_ID: [Capability.COMPETITOR_ANALYSIS.value],
+    valuation_analyst.AGENT_ID: [Capability.VALUATION.value],
+    earnings_analyst.AGENT_ID: [Capability.EARNINGS_CALL.value],
+    risk_analyst.AGENT_ID: [Capability.RISK_ANALYSIS.value],
 }
 
 _SKILL_SPECS: dict[str, dict] = {
@@ -91,6 +111,51 @@ _SKILL_SPECS: dict[str, dict] = {
         "tags": ["news", "sentiment", "media"],
         "examples": ["NVDA"],
     },
+    Capability.SEC_FILINGS.value: {
+        "name": "SEC Filings",
+        "description": (
+            "Recent material SEC filings (10-K, 10-Q, 8-K, proxy) and filed XBRL "
+            "facts from EDGAR -- the primary regulatory record."
+        ),
+        "tags": ["sec", "edgar", "filings", "regulatory"],
+        "examples": ["NVDA"],
+    },
+    Capability.COMPETITOR_ANALYSIS.value: {
+        "name": "Competitor Analysis",
+        "description": (
+            "Relative positioning against industry peers on valuation multiples, "
+            "margins, growth, and returns, with percentile ranks."
+        ),
+        "tags": ["competitors", "peers", "relative-value"],
+        "examples": ["NVDA"],
+    },
+    Capability.VALUATION.value: {
+        "name": "Valuation Estimate",
+        "description": (
+            "Peer-relative valuation using the industry-appropriate methods, "
+            "producing an implied value range rather than a point target."
+        ),
+        "tags": ["valuation", "multiples", "fair-value"],
+        "examples": ["NVDA"],
+    },
+    Capability.EARNINGS_CALL.value: {
+        "name": "Earnings Analysis",
+        "description": (
+            "Earnings history, consensus surprise track record, and upcoming "
+            "reporting date. Transcripts are not available from current sources."
+        ),
+        "tags": ["earnings", "estimates", "surprises"],
+        "examples": ["NVDA"],
+    },
+    Capability.RISK_ANALYSIS.value: {
+        "name": "Risk Analysis",
+        "description": (
+            "Risks detected by deterministic thresholds over computed financial "
+            "metrics, combined with industry-specific risk context."
+        ),
+        "tags": ["risk", "leverage", "liquidity"],
+        "examples": ["NVDA"],
+    },
 }
 
 _AGENT_DESCRIPTIONS: dict[str, str] = {
@@ -108,6 +173,25 @@ _AGENT_DESCRIPTIONS: dict[str, str] = {
     news_analyst.AGENT_ID: (
         "Gathers recent coverage and assesses sentiment, flagging thin coverage "
         "rather than overstating confidence."
+    ),
+    sec_filings.AGENT_ID: (
+        "Retrieves the primary regulatory record from SEC EDGAR: material filings "
+        "and facts as filed, not as interpreted by a vendor."
+    ),
+    competitor_analyst.AGENT_ID: (
+        "Positions the company against real industry constituents, since a "
+        "multiple is meaningless without a comparison set."
+    ),
+    valuation_analyst.AGENT_ID: (
+        "Applies industry-appropriate valuation methods against peer medians, "
+        "declining to produce a figure where a method does not apply."
+    ),
+    earnings_analyst.AGENT_ID: (
+        "Analyzes the quantitative earnings record and consensus surprise history."
+    ),
+    risk_analyst.AGENT_ID: (
+        "Detects risks from measured financial signals via deterministic "
+        "thresholds rather than generic industry boilerplate."
     ),
 }
 

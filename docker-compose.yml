@@ -73,7 +73,7 @@ services:
       NEWSAPI_KEY: ${NEWSAPI_KEY:-}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       POLYGON_API_KEY: ${POLYGON_API_KEY:-}
-      SEC_USER_AGENT: ${SEC_USER_AGENT:-AI Investment Research Platform (academic project)}
+      SEC_USER_AGENT: ${SEC_USER_AGENT:-AI Investment Research Platform academic-project@example.com}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     networks: [irp]
     restart: unless-stopped

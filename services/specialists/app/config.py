@@ -33,7 +33,10 @@ class Settings(BaseSettings):
     newsapi_key: str = ""
     tavily_api_key: str = ""
     polygon_api_key: str = ""
-    sec_user_agent: str = "AI Investment Research Platform (academic project)"
+    # SEC EDGAR rejects requests (403) whose User-Agent lacks contact
+    # information. The format must identify the requester and provide a way to
+    # reach them; a bare product name is not accepted.
+    sec_user_agent: str = "AI Investment Research Platform academic-project@example.com"
 
     # --- resilience ---------------------------------------------------------
     provider_timeout_s: int = 20

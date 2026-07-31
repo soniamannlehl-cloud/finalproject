@@ -116,7 +116,10 @@ def _llm_refine(
     return chosen, rationale
 
 
-def _build_tasks(playbook: playbooks.Playbook, ticker: str, company_name: str) -> list[TaskSpec]:
+def _build_tasks(
+    playbook: playbooks.Playbook, ticker: str, company_name: str,
+    industry: str | None = None,
+) -> list[TaskSpec]:
     """
     Expand a playbook's capabilities into a dependency-ordered task DAG.
 
@@ -127,7 +130,20 @@ def _build_tasks(playbook: playbooks.Playbook, ticker: str, company_name: str) -
     """
     selected = playbook.required_capabilities + playbook.optional_capabilities
     present = set(selected)
-    inputs = {"ticker": ticker, "company_name": company_name}
+    base_inputs = {"ticker": ticker, "company_name": company_name}
+
+    # Capability-specific context from the playbook. This is how the industry
+    # framework actually reaches the specialists: the valuation agent is told
+    # WHICH methods to attempt, and the risk agent is told which industry
+    # risks matter -- rather than each agent re-deriving that itself.
+    extra_inputs: dict[str, dict] = {
+        "valuation.estimate": {
+            "valuation_methods": [v.value for v in playbook.valuation_methods],
+            "industry": industry,
+        },
+        "risk.analysis": {"industry_risks": playbook.key_risks, "industry": industry},
+        "competitors.analysis": {"industry": industry},
+    }
 
     tasks: list[TaskSpec] = []
     for capability in selected:
@@ -138,7 +154,7 @@ def _build_tasks(playbook: playbooks.Playbook, ticker: str, company_name: str) -
             TaskSpec(
                 task_id=f"task_{capability.replace('.', '_')}",
                 capability=capability,
-                inputs=dict(inputs),
+                inputs={**base_inputs, **extra_inputs.get(capability, {})},
                 # Dependencies are declared by capability; task_ids follow the
                 # same derivation, so this stays consistent.
                 depends_on=[f"task_{d.replace('.', '_')}" for d in depends],
@@ -173,7 +189,7 @@ def build_plan(
     )
     playbook = playbooks.get_playbook(classification)
 
-    tasks = _build_tasks(playbook, ticker, company_name)
+    tasks = _build_tasks(playbook, ticker, company_name, industry)
 
     # A replan (HITL #2 requested more analysis) can add capabilities the
     # original plan omitted.

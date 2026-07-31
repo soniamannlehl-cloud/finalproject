@@ -11,6 +11,8 @@ import logging
 
 from fastapi import FastAPI
 
+from .a2a import cards
+from .a2a.server import router as a2a_router
 from .config import get_settings
 
 logging.basicConfig(level=get_settings().log_level)
@@ -21,6 +23,8 @@ app = FastAPI(
     description="Data plane: research agents exposed over A2A.",
     version="0.1.0",
 )
+
+app.include_router(a2a_router)
 
 
 @app.get("/health")
@@ -62,22 +66,13 @@ def health() -> dict:
     }
 
 
-@app.get("/agents")
-def list_agents() -> dict:
-    """
-    A2A discovery endpoint.
-
-    The Research Director calls this at startup to build its capability ->
-    endpoint index. Returns an empty fleet in M0; populated in M2.
-    """
-    return {"agents": [], "count": 0, "note": "specialist fleet lands in M2"}
-
-
 @app.get("/")
 def root() -> dict:
     return {
         "service": "AI Investment Research Platform -- Specialists",
         "role": "data-plane",
-        "discovery": "/agents",
+        "discovery": "/a2a/agents",
+        "agent_card": "/.well-known/agent.json",
+        "capabilities": cards.served_capabilities(),
         "health": "/health",
     }

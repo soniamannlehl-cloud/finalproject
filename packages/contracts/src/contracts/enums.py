@@ -119,6 +119,7 @@ class Capability(StrEnum):
     specialist fleet swappable without touching planning logic.
     """
 
+    COMPANY_VALIDATE = "company.validate"
     COMPANY_PROFILE = "company.profile"
     INDUSTRY_ANALYSIS = "industry.analysis"
     FINANCIAL_STATEMENTS = "financials.statements"

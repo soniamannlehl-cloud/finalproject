@@ -28,12 +28,14 @@ deliberately so each framework can be used where it is genuinely best:
 | `committee` | 8082 | **CrewAI** | Deliberation — Bull / Bear / CIO debate |
 | `postgres` | 5432 | — | Evidence repository + workflow checkpoints |
 
-The split is not decoration: LangGraph and CrewAI pin conflicting
-`langchain-core` ranges and cannot share a Python environment. Isolating them
-behind **A2A** is what makes using both viable, and it is what makes A2A
-load-bearing rather than ceremonial. See
-[ARCHITECTURE.md](ARCHITECTURE.md) for the full rationale and the
-counter-experiment that verifies it.
+The split exists so that **A2A is a real network protocol rather than
+decorated function calls**: agents are separately addressable services that
+advertise capabilities and are discovered at runtime. It also keeps the
+control plane image at ~530MB instead of ~1.8GB.
+
+It is *not* justified by a dependency conflict — that hypothesis was tested
+and **refuted**. See [ARCHITECTURE.md](ARCHITECTURE.md) §
+"Dependency isolation: measured" for the experiment and what it changed.
 
 ```
   Next.js frontend

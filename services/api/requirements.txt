@@ -5,9 +5,15 @@
 #       direction, safety pipeline, report rendering.
 #
 # ISOLATION NOTE: this service owns the langchain/langgraph dependency tree.
-# CrewAI (services/committee) pins overlapping langchain-core versions and
-# must never share an environment with it -- that conflict is the reason
-# this platform is split across three containers. See ARCHITECTURE.md.
+# It is kept separate from CrewAI (services/committee) so the control plane
+# image stays small (~530MB vs ~1.8GB) and rebuilds stay fast during
+# development.
+#
+# Measured, not assumed: LangGraph and CrewAI DO resolve together without a
+# hard conflict (verified -- see ARCHITECTURE.md "Dependency isolation:
+# measured"). The observed coupling is softer: CrewAI pulls pydantic down
+# from 2.13.4 to 2.12.5. The separation is justified by A2A semantics and
+# image size, not by an install-time incompatibility.
 # ============================================================================
 
 # --- web ---

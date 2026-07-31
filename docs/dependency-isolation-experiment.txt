@@ -1,0 +1,53 @@
+############################################################
+# DEPENDENCY ISOLATION VERIFICATION
+############################################################
+
+==========================================================
+SERVICE: api
+==========================================================
+INSTALL: OK
+PIP CHECK: OK (no broken/conflicting requirements)
+KEY VERSIONS:
+  fastapi                       0.141.1
+  langchain-core                1.5.3
+  langgraph                     1.2.10
+  openai                        2.52.0
+  pydantic                      2.13.4
+
+==========================================================
+SERVICE: specialists
+==========================================================
+INSTALL: OK
+PIP CHECK: OK (no broken/conflicting requirements)
+KEY VERSIONS:
+  a2a-sdk                            1.1.2
+  fastapi                            0.141.1
+  openai                             2.52.0
+  pydantic                           2.13.4
+
+==========================================================
+SERVICE: committee
+==========================================================
+INSTALL: OK
+PIP CHECK: OK (no broken/conflicting requirements)
+KEY VERSIONS:
+  crewai                                   1.15.10
+  fastapi                                  0.141.1
+  openai                                   2.52.0
+  pydantic                                 2.12.5
+
+==========================================================
+COUNTER-EXPERIMENT: langgraph + crewai in ONE environment
+==========================================================
+RESULT: pip resolved BOTH together (no hard conflict)
+Checking for silently broken deps...
+  pip check: CLEAN
+Resolved versions in combined env:
+  crewai                                   1.15.10
+  langchain-core                           1.5.3
+  langgraph                                1.2.10
+  pydantic                                 2.12.5
+
+############################################################
+# DONE
+############################################################

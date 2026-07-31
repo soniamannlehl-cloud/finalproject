@@ -3,9 +3,12 @@
 # ============================================================================
 # Build context is the REPO ROOT. See docker-compose.yml.
 #
-# This image intentionally contains NO LangGraph. That absence is the whole
-# point: CrewAI's dependency tree is quarantined here so it cannot collide
-# with the control plane's.
+# This image intentionally contains NO LangGraph -- not because the two
+# cannot coexist (they can; this was measured), but because keeping CrewAI's
+# ~1.3GB dependency tree out of the control plane keeps that image at ~530MB
+# and its rebuilds fast. The /health endpoint asserts langgraph's absence so
+# an accidental dependency leak fails loudly rather than silently bloating
+# the image.
 # ============================================================================
 FROM python:3.11-slim
 

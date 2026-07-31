@@ -3,12 +3,16 @@
 # ============================================================================
 # Owns: the CrewAI investment committee (Bull Analyst, Bear Analyst, CIO).
 #
-# ISOLATION NOTE: CrewAI is the single most opinionated dependency in this
-# platform -- it pins its own langchain-core, litellm, and pydantic ranges.
-# Installing it alongside langgraph (services/api) produces either a
-# resolver failure or a silently broken environment. Quarantining it behind
-# an A2A endpoint is what makes using both frameworks viable at all, and is
-# the primary justification for the 3-service architecture.
+# ISOLATION NOTE: CrewAI is by far the heaviest dependency in this platform
+# (~1.3GB of transitive packages: litellm, chromadb, tokenizers). It lives
+# in its own service so the control plane image stays lean and rebuilds stay
+# fast.
+#
+# Honest accounting: CrewAI and LangGraph DO install together without a hard
+# conflict -- this was measured, not assumed (see ARCHITECTURE.md). The real
+# coupling is softer: CrewAI constrains pydantic to 2.12.5 where the other
+# services resolve 2.13.4. The separation is justified by A2A semantics and
+# image size, not by an install-time incompatibility.
 #
 # This service is stateless: it receives a condensed evidence brief and
 # returns argued positions. It never fetches data and never touches the DB.

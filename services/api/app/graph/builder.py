@@ -34,6 +34,7 @@ from ..director.director import (
     specialist_proxy_node,
 )
 from ..planning.planner import planner_node
+from ..safety.pipeline import safety_node
 from ..thesis.agent import thesis_node
 from .nodes.validate import route_after_validation, validate_company_node
 from .state import ResearchState
@@ -51,6 +52,7 @@ def build_graph() -> StateGraph:
     graph.add_node("specialist_proxy", specialist_proxy_node)
     graph.add_node("collect", collect_node)
     graph.add_node("thesis", thesis_node)
+    graph.add_node("safety", safety_node)
 
     graph.add_edge(START, "validate_company")
 
@@ -84,9 +86,13 @@ def build_graph() -> StateGraph:
         route_after_collect,
         {
             "continue": "director",  # more layers remain
-            "done": END,             # M5 replaces this with the safety pipeline
+            "done": "safety",        # research complete -> verify before concluding
         },
     )
+
+    # Safety runs once, after all research is in. M6 routes its output to the
+    # committee; for now it terminates the run.
+    graph.add_edge("safety", END)
 
     return graph
 

@@ -235,6 +235,59 @@ async def get_run_evidence(run_id: str) -> dict:
     }
 
 
+@router.get("/{run_id}/safety")
+async def get_run_safety(run_id: str) -> dict:
+    """
+    The safety verdict, including what was NOT checked.
+
+    `semantic_verified` is reported explicitly because an unverified run must
+    not be mistaken for a clean one: a pipeline that returns green having
+    examined nothing manufactures false assurance.
+    """
+    run = await db.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"run {run_id} not found")
+
+    app_graph = compile_graph(db.get_checkpointer())
+    snapshot = await app_graph.aget_state({"configurable": {"thread_id": run["thread_id"]}})
+    report = (snapshot.values or {}).get("safety_report")
+
+    if report is None:
+        return {
+            "run_id": run_id,
+            "status": "safety pipeline has not run for this run yet",
+            "safety_report": None,
+        }
+
+    findings = report.get("findings", [])
+    by_severity: dict[str, int] = {}
+    for f in findings:
+        by_severity[f["severity"]] = by_severity.get(f["severity"], 0) + 1
+
+    not_run = [f for f in findings if f["check_name"].endswith("_not_run")]
+
+    return {
+        "run_id": run_id,
+        "evidence_score": report["evidence_score"],
+        "coverage_ratio": round(
+            len(report["coverage"]["satisfied_capabilities"])
+            / max(1, len(report["coverage"]["required_capabilities"])), 3
+        ),
+        "is_blocking": bool(
+            report.get("unsupported_claim_ids")
+            or any(f["severity"] == "blocking" for f in findings)
+        ),
+        "semantic_verified": len(not_run) == 0,
+        "checks_not_run": [f["message"] for f in not_run],
+        "unsupported_claim_ids": report.get("unsupported_claim_ids", []),
+        "stale_evidence_count": len(report.get("stale_evidence_ids", [])),
+        "contradiction_count": report.get("contradiction_count", 0),
+        "findings_by_severity": by_severity,
+        "findings": findings,
+        "coverage": report["coverage"],
+    }
+
+
 @router.get("/{run_id}/thesis")
 async def get_run_thesis(run_id: str) -> dict:
     """

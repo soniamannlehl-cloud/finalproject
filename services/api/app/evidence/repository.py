@@ -102,6 +102,30 @@ async def get_evidence_for_run(run_id: str) -> list[dict]:
     return [dict(zip(keys, row)) for row in rows]
 
 
+async def get_claims_for_run(run_id: str) -> list[dict]:
+    """
+    All interpretive claims for a run.
+
+    Consumed by the safety pipeline: the citation check verifies each
+    claim's evidence_ids resolve, and the semantic checks verify the claim
+    text actually follows from that evidence.
+    """
+    async with db_cursor() as cur:
+        await cur.execute(
+            """
+            SELECT claim_id, text, evidence_ids, confidence, polarity,
+                   category, author_agent_id, created_at
+            FROM claims WHERE run_id = %s ORDER BY created_at ASC
+            """,
+            (run_id,),
+        )
+        rows = await cur.fetchall()
+
+    keys = ("claim_id", "text", "evidence_ids", "confidence", "polarity",
+            "category", "author_agent_id", "created_at")
+    return [dict(zip(keys, row)) for row in rows]
+
+
 async def resolve_evidence_ids(evidence_ids: list[str]) -> set[str]:
     """
     Which of these IDs actually exist.

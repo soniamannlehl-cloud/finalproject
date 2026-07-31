@@ -1,0 +1,31 @@
+# ============================================================================
+# COMMITTEE SERVICE -- deliberation
+# ============================================================================
+# Owns: the CrewAI investment committee (Bull Analyst, Bear Analyst, CIO).
+#
+# ISOLATION NOTE: CrewAI is the single most opinionated dependency in this
+# platform -- it pins its own langchain-core, litellm, and pydantic ranges.
+# Installing it alongside langgraph (services/api) produces either a
+# resolver failure or a silently broken environment. Quarantining it behind
+# an A2A endpoint is what makes using both frameworks viable at all, and is
+# the primary justification for the 3-service architecture.
+#
+# This service is stateless: it receives a condensed evidence brief and
+# returns argued positions. It never fetches data and never touches the DB.
+# ============================================================================
+
+# --- web / A2A endpoint ---
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.7,<3.0
+pydantic-settings>=2.5
+
+# --- deliberation framework ---
+crewai>=0.80
+
+# --- observability ---
+opentelemetry-api>=1.27
+opentelemetry-sdk>=1.27
+
+# --- shared contracts (installed from local path in Dockerfile) ---
+# irp-contracts -- see Dockerfile

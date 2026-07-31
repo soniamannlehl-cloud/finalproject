@@ -1,0 +1,27 @@
+[project]
+name = "irp-contracts"
+version = "0.1.0"
+description = "Shared data contracts for the AI Investment Research Platform"
+requires-python = ">=3.11"
+
+# INTENTIONALLY MINIMAL.
+#
+# This package is imported by all three services, each of which has a
+# different (and mutually incompatible) framework dependency tree:
+#   services/api          -> langgraph, langchain-core
+#   services/specialists  -> a2a-sdk, data-provider clients
+#   services/committee    -> crewai
+#
+# If this package ever depends on a framework, it stops being a neutral
+# seam and reintroduces the exact version conflict the 3-service split
+# exists to prevent. Pydantic only. No exceptions.
+dependencies = [
+    "pydantic>=2.7,<3.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

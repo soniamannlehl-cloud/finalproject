@@ -1,7 +1,37 @@
+# --- secrets ---
 .env
+*.pem
+*.key
+
+# --- python ---
 __pycache__/
-*.pyc
-checkpoints.db
+*.py[cod]
+*.egg-info/
+build/
+dist/
 .venv/
+.venv-*/
 venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# --- node / frontend ---
 node_modules/
+.next/
+out/
+.turbo/
+
+# --- generated artifacts ---
+*.pdf
+!docs/samples/*.pdf
+reports/
+.cache/
+
+# --- os / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,100 @@
+# ============================================================================
+# AI Investment Research Platform
+# ============================================================================
+# Three Python services with mutually incompatible dependency trees, plus
+# Postgres. Each service builds from the REPO ROOT context so it can copy in
+# the shared `packages/contracts` package.
+#
+#   api          :8080  control plane   -- LangGraph, HITL, planning, safety
+#   specialists  :8081  data plane      -- research agents + provider APIs
+#   committee    :8082  deliberation    -- CrewAI Bull/Bear/CIO
+#   postgres     :5432  checkpoints + evidence repository
+#
+# Start everything:  docker compose up --build
+# ============================================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: irp-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-irp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-irp}
+      POSTGRES_DB: ${POSTGRES_DB:-irp}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./ops/db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # Other services wait on this, so the check must reflect real readiness.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-irp} -d ${POSTGRES_DB:-irp}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [irp]
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    container_name: irp-api
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-irp}:${POSTGRES_PASSWORD:-irp}@postgres:5432/${POSTGRES_DB:-irp}
+      SPECIALISTS_URL: http://specialists:8081
+      COMMITTEE_URL: http://committee:8082
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-ai-investment-research-platform}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      specialists:
+        condition: service_started
+      committee:
+        condition: service_started
+    networks: [irp]
+    restart: unless-stopped
+
+  specialists:
+    build:
+      context: .
+      dockerfile: services/specialists/Dockerfile
+    container_name: irp-specialists
+    ports:
+      - "8081:8081"
+    environment:
+      PUBLIC_BASE_URL: http://specialists:8081
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      FMP_API_KEY: ${FMP_API_KEY:-}
+      NEWSAPI_KEY: ${NEWSAPI_KEY:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      POLYGON_API_KEY: ${POLYGON_API_KEY:-}
+      SEC_USER_AGENT: ${SEC_USER_AGENT:-AI Investment Research Platform (academic project)}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    networks: [irp]
+    restart: unless-stopped
+
+  committee:
+    build:
+      context: .
+      dockerfile: services/committee/Dockerfile
+    container_name: irp-committee
+    ports:
+      - "8082:8082"
+    environment:
+      PUBLIC_BASE_URL: http://committee:8082
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    networks: [irp]
+    restart: unless-stopped
+
+networks:
+  irp:
+    driver: bridge
+
+volumes:
+  postgres_data:

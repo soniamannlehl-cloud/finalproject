@@ -1,136 +1,155 @@
-# Collaborative Investment Research Platform
+# AI Investment Research Analyst
 
-A multi-agent LangGraph system that helps research a public company.
-Specialist agents gather sentiment, financial, and macro/industry evidence;
-the Orchestrator synthesizes it into a beginner-friendly memo plus a draft
-recommendation, which a human investment committee must approve, reject, or
-send back for revision before anything is finalized.
+A multi-agent system that simulates how a professional investment research
+firm performs due diligence on a publicly traded company: it plans a
+research strategy, dispatches specialist agents to gather evidence, maintains
+a living investment thesis, subjects its conclusions to safety review, runs
+an adversarial investment committee, and requires human approval before any
+recommendation is finalized.
 
-See [PROJECT_BRIEF.md](PROJECT_BRIEF.md) for the full design spec and
-`ARCHITECTURE.md` for the system diagram, framework justification, and
-tradeoffs.
+The emphasis is architecture, planning, explainability, and engineering
+discipline — not generating investment advice. Every factual statement in
+the output is traceable to a specific piece of retrieved evidence, and the
+system refuses to issue a directional call when evidence is insufficient.
 
-## Setup
+> ⚠️ Academic project. Not investment advice.
 
-**Requires Python 3.11+.**
+---
 
-```bash
-python3.11 -m venv .venv
+## Architecture at a glance
+
+Three Python services with **mutually incompatible dependency trees**, split
+deliberately so each framework can be used where it is genuinely best:
+
+| Service | Port | Framework | Role |
+|---|---|---|---|
+| `api` | 8080 | **LangGraph** | Control plane — workflow, HITL, planning, safety |
+| `specialists` | 8081 | **A2A** | Data plane — research agents + provider APIs |
+| `committee` | 8082 | **CrewAI** | Deliberation — Bull / Bear / CIO debate |
+| `postgres` | 5432 | — | Evidence repository + workflow checkpoints |
+
+The split is not decoration: LangGraph and CrewAI pin conflicting
+`langchain-core` ranges and cannot share a Python environment. Isolating them
+behind **A2A** is what makes using both viable, and it is what makes A2A
+load-bearing rather than ceremonial. See
+[ARCHITECTURE.md](ARCHITECTURE.md) for the full rationale and the
+counter-experiment that verifies it.
+
+```
+  Next.js frontend
+        │
+        ▼
+  ┌───────────────┐   A2A/HTTP   ┌──────────────────┐
+  │ api           │─────────────▶│ specialists      │──▶ FMP · yfinance
+  │ (LangGraph)   │              │ (A2A + tools)    │    SEC · NewsAPI
+  │ control plane │              │ data plane       │    Tavily · Polygon
+  └───────┬───────┘              └──────────────────┘
+          │ A2A/HTTP             ┌──────────────────┐
+          ├─────────────────────▶│ committee        │
+          │                      │ (CrewAI)         │
+          │                      └──────────────────┘
+          ▼
+     Postgres  ◀── evidence, thesis history, checkpoints
 ```
 
-Activate it, then install dependencies:
+---
 
-```bash
-.venv/Scripts/pip install -r requirements.txt      # Windows
-# .venv/bin/pip install -r requirements.txt        # macOS/Linux
-```
+## Quick start
 
-Copy `.env.example` to `.env` and fill in API keys:
+**Prerequisites:** Docker Desktop, and an OpenAI API key.
 
 ```bash
 cp .env.example .env
 ```
 
-| Key | Required? | Used for | Get one at |
-|---|---|---|---|
-| `OPENAI_API_KEY` | Yes, unless using Google | Default LLM (`LLM_PROVIDER=openai`) | platform.openai.com |
-| `GOOGLE_API_KEY` | Only if `LLM_PROVIDER=google` | Alternate LLM | aistudio.google.com |
-| `ALPHA_VANTAGE_API_KEY` | Recommended | Fallback for financial data + news (25 req/day free tier) | alphavantage.co/support/#api-key |
-| `NEWSAPI_KEY` | Recommended | Primary news source for Sentiment + Macro/Industry analysts | newsapi.org/register |
-| `FRED_API_KEY` | Recommended | Macro indicators (GDP, CPI, fed funds, unemployment) | fred.stlouisfed.org/docs/api/api_key.html |
-| `LANGSMITH_API_KEY` | Optional | Traces the Orchestrator's 5-step reasoning chain | smith.langchain.com |
+Add your `OPENAI_API_KEY` to `.env`, then:
 
-The system degrades gracefully without the "recommended" keys (yfinance
-covers financial data and sector ETF performance on its own; missing news
-keys just mean the Sentiment Analyst and Macro/Industry landscape layer
-report themselves as unavailable rather than failing the whole run).
-
-## Running it
-
-There's no CLI or frontend in this build (see `PROJECT_BRIEF.md`'s file
-structure) -- `graph.py` exposes `compile_graph()`, which you drive with
-LangGraph's own `invoke()` / `Command(resume=...)` pattern. A minimal
-driver:
-
-```python
-from langgraph.types import Command
-from graph import compile_graph
-from state import get_initial_state
-
-app = compile_graph()  # uses CHECKPOINT_DB from .env
-config = {"configurable": {"thread_id": "session-1"}}
-
-# Turn 1: kick off research
-result = app.invoke(get_initial_state("Tesla"), config)
-print(result["__interrupt__"])  # Checkpoint #1: confirm the matched ticker
-
-# Resume with the user's yes/no
-result = app.invoke(Command(resume="yes"), config)
-print(result["__interrupt__"])  # Checkpoint #2: memo + draft_recommendation, ready for committee review
-
-# Ask a follow-up (routed via A2A to the owning specialist)
-result = app.invoke(
-    Command(resume={"action": "question", "question": "How risky is this?"}),
-    config,
-)
-print(result["__interrupt__"])  # same checkpoint, updated qa_history
-
-# Send it back for revision -- the Orchestrator updates its thesis and
-# recommendation to address the feedback, then re-presents Checkpoint #2
-result = app.invoke(
-    Command(resume={
-        "action": "decision",
-        "decision": "revise",
-        "feedback": "Address customer concentration risk before we approve.",
-    }),
-    config,
-)
-print(result["__interrupt__"])  # updated memo + draft_recommendation, revision_count incremented
-
-# Approve (or reject) to finalize -- nothing is finalized before this point
-result = app.invoke(
-    Command(resume={
-        "action": "decision",
-        "decision": "approve",
-        "feedback": "Concentration risk now adequately addressed.",
-    }),
-    config,
-)
-print(result["status"])  # "complete"
-print(result["committee_decision"])  # "approved"
+```bash
+docker compose up --build
 ```
 
-If the user says "no" at Checkpoint #1, or the company can't be resolved
-(private company / not found), the graph run ends for that turn -- start a
-new `invoke()` with a fresh `raw_user_input` to try again under the same
-`thread_id` (conversation history persists via the checkpointer). A
-"revise" decision is capped at `MAX_REVISION_ROUNDS` (default 3, in
-`config.py`) -- past that, the session auto-closes as rejected rather than
-looping forever.
+Verify all three services are healthy:
 
-## Project layout
+```bash
+curl http://localhost:8080/health && curl http://localhost:8081/health && curl http://localhost:8082/health
+```
 
-See `PROJECT_BRIEF.md` for the full file-by-file spec. Key entry points:
+| URL | What it is |
+|---|---|
+| http://localhost:8080/docs | API service — interactive OpenAPI docs |
+| http://localhost:8081/agents | Specialist fleet discovery (A2A) |
+| http://localhost:8082/health | Committee service health |
 
-- [state.py](state.py) -- `InvestmentResearchState` schema + `get_initial_state()`
-- [config.py](config.py) -- env loading, `get_llm()` factory, thresholds
-- [graph.py](graph.py) -- StateGraph wiring, interrupts, routing
-- `agents/` -- the 5 agents (Intake, Sentiment, Financial, Macro & Industry, Orchestrator)
-- `tools/` -- deterministic calculations, news search, A2A router
-- `data/` -- industry ratio + sector indicator lookup tables
+### API keys
 
-## Known limitations
+Only `OPENAI_API_KEY` is required. Every data provider has a keyless
+fallback (yfinance), so the platform runs and demonstrates gracefully with
+no paid data subscriptions — missing providers reduce the evidence score
+and are **disclosed in the report** rather than silently ignored.
 
-- Sentiment Analyst's path to `data_failure_check` runs through a trivial
-  no-op node, `sentiment_sync` (see `graph.py`'s module docstring). It
-  exists only to give that path the same hop-depth as Financial/Macro
-  Analyst's path (via `industry_identification`) -- an asymmetric-depth
-  fan-in at that point reproducibly corrupted execution in LangGraph 1.2.10
-  once combined with the Checkpoint #2 multi-turn interrupt loop.
-- The Alpha Vantage fallback path for financial data doesn't populate
-  industry/sector (its taxonomy doesn't match `data/industry_ratios.json`'s
-  yfinance-based keys), so a fallback-sourced company always gets the
-  universal ratio set only.
-- `data/industry_ratios.json` and `data/sector_indicators.json` cover a
-  curated set of common industries with a sector-level fallback, not
-  yfinance's full industry taxonomy (hundreds of values).
+| Key | Required | Purpose |
+|---|---|---|
+| `OPENAI_API_KEY` | **Yes** | All agent reasoning |
+| `LANGSMITH_API_KEY` | Recommended | Traces every agent decision |
+| `FMP_API_KEY` | Optional | Financial statements (falls back to yfinance) |
+| `NEWSAPI_KEY` | Optional | News (falls back to Tavily) |
+| `TAVILY_API_KEY` | Optional | Web search fallback |
+| `POLYGON_API_KEY` | Optional | Market data fallback |
+
+---
+
+## Repository layout
+
+```
+├── packages/contracts/     Shared Pydantic schemas — the seam between services.
+│                           Pydantic-only by design; adding a framework here
+│                           would reintroduce the conflict the split prevents.
+├── services/
+│   ├── api/                LangGraph workflow, HITL, planning, safety, reports
+│   ├── specialists/        Research agents, data-provider tools, A2A server
+│   └── committee/          CrewAI Bull / Bear / CIO
+├── frontend/               Next.js + React + Tailwind
+├── ops/db/init/            Postgres schema
+└── docs/                   Diagrams, ADRs, sample reports
+```
+
+---
+
+## Development
+
+Run the contracts test suite (no Docker required):
+
+```bash
+python -m venv .venv-contracts && .venv-contracts/Scripts/pip install -e packages/contracts pytest
+```
+
+```bash
+.venv-contracts/Scripts/python -m pytest packages/contracts/tests -v
+```
+
+---
+
+## Build status
+
+Built incrementally; each milestone ends compiling, tested, and committed.
+
+| Milestone | Scope | Status |
+|---|---|---|
+| **M0** | Service skeletons, contracts, Docker, dependency isolation proof | ✅ |
+| M1 | Company validation + HITL #1 + checkpointing | ⬜ |
+| M2 | Planner → Director → one specialist over real A2A (vertical slice) | ⬜ |
+| M3 | Full specialist fleet + parallel fan-out + retry/fallback | ⬜ |
+| M4 | Evidence repository + versioned living thesis | ⬜ |
+| M5 | Safety pipeline + `INSUFFICIENT_EVIDENCE` path | ⬜ |
+| M6 | CrewAI investment committee | ⬜ |
+| M7 | HITL #2 + replan loop | ⬜ |
+| M8 | PDF report generation | ⬜ |
+| M9 | Frontend | ⬜ |
+| M10 | LangSmith cross-service tracing + evaluation harness | ⬜ |
+
+---
+
+## Documentation
+
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — system design, framework
+  justification, data flow, tradeoffs, and technical analysis.

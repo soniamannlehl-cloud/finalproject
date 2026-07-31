@@ -1,0 +1,36 @@
+# ============================================================================
+# SPECIALISTS SERVICE -- the data plane
+# ============================================================================
+# Owns: the 9 research agents, all external data-provider integrations, and
+#       the A2A server that exposes them.
+#
+# DESIGN NOTE: deliberately NO agent framework here. These agents are
+# retrieval-and-compute workloads -- fetch from a provider, normalize,
+# compute metrics deterministically, then make at most one LLM call to
+# write an interpretation. Google ADK was evaluated and rejected for this
+# role: it would have duplicated orchestration the API service already
+# owns, added a fourth dependency tree, and hidden token spend inside
+# framework prompt scaffolding. See ARCHITECTURE.md "Framework selection".
+# ============================================================================
+
+# --- web / A2A server ---
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.7,<3.0
+pydantic-settings>=2.5
+a2a-sdk>=0.2                     # AgentCard publication + task envelopes
+
+# --- data providers ---
+httpx>=0.27
+yfinance>=0.2.50                 # market data + statements (no key required)
+tenacity>=9.0                    # retry/backoff/circuit-breaking
+
+# --- LLM (single direct client -- one interpretation call per agent) ---
+openai>=1.50
+
+# --- observability (traceparent propagated from the control plane) ---
+opentelemetry-api>=1.27
+opentelemetry-sdk>=1.27
+
+# --- shared contracts (installed from local path in Dockerfile) ---
+# irp-contracts -- see Dockerfile

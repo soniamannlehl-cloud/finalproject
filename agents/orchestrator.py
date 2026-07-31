@@ -232,6 +232,15 @@ def build_memo_node(state: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def checkpoint_2_review_node(state: dict) -> dict:
+    """
+    Loops on interrupt() within a single node execution -- the standard
+    LangGraph pattern for a multi-turn HITL exchange -- rather than a
+    graph-level self-loop edge (which caused concurrent writes to the same
+    state key across parallel-looking supersteps). Each resume replays this
+    function from the top; already-answered interrupt() calls replay from
+    cache, so qa_history rebuilds deterministically and only the newest
+    interrupt() call actually pauses.
+    """
     memo = {
         "headline_finding": state.get("headline_finding"),
         "thesis_summary": state.get("thesis_summary"),
@@ -244,30 +253,33 @@ def checkpoint_2_review_node(state: dict) -> dict:
     }
     qa_history = state.get("checkpoint_2_qa_history") or []
 
-    user_input = interrupt({
-        "type": "checkpoint_2_memo_review",
-        "memo": memo,
-        "qa_history": qa_history,
-        "prompt": (
-            "Review the memo above. Ask a follow-up question about any section, or share your "
-            "own takeaway to close the session -- there's no approve/reject here, just your own conclusion."
-        ),
-    })
+    while True:
+        user_input = interrupt({
+            "type": "checkpoint_2_memo_review",
+            "memo": memo,
+            "qa_history": qa_history,
+            "prompt": (
+                "Review the memo above. Ask a follow-up question about any section, or share "
+                "your own takeaway to close the session -- there's no approve/reject here, just "
+                "your own conclusion."
+            ),
+        })
 
-    action = (user_input or {}).get("action") if isinstance(user_input, dict) else None
+        action = (user_input or {}).get("action") if isinstance(user_input, dict) else None
 
-    if action == "question":
-        question = (user_input or {}).get("question", "")
-        agent_id = route_question(question, llm=get_llm())
-        message = send_message(agent_id, question, state)
-        new_qa_history = qa_history + [{
-            "question": question,
-            "routed_to_agent": agent_id,
-            "answer": message.answer,
-        }]
-        return {"checkpoint_2_qa_history": new_qa_history, "status": "qa"}
+        if action == "question":
+            question = (user_input or {}).get("question", "")
+            agent_id = route_question(question, llm=get_llm())
+            message = send_message(agent_id, question, state)
+            qa_history = qa_history + [{
+                "question": question,
+                "routed_to_agent": agent_id,
+                "answer": message.answer,
+            }]
+            continue
 
-    # Anything else (explicit "close", or no action) ends the session on the
-    # user's own free-form takeaway -- no forced approve/reject, no system verdict.
-    takeaway = (user_input or {}).get("takeaway", "") if isinstance(user_input, dict) else ""
-    return {"user_takeaway": takeaway, "status": "complete"}
+        # Anything else (explicit "close", or no action) ends the session on
+        # the user's own free-form takeaway -- no forced approve/reject, no
+        # system verdict.
+        takeaway = (user_input or {}).get("takeaway", "") if isinstance(user_input, dict) else ""
+        return {"checkpoint_2_qa_history": qa_history, "user_takeaway": takeaway, "status": "complete"}

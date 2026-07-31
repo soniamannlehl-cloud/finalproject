@@ -70,9 +70,22 @@ MIN_FINANCIAL_HISTORY_DAYS = 365
 MACRO_TREND_LOOKBACK_MONTHS = 12
 SECTOR_PERFORMANCE_WINDOWS = ["3mo", "6mo", "ytd"]
 
-# --- LangSmith (optional tracing, used for inspecting Orchestrator reasoning_chain) ---
+# --- LangSmith (tracing, used for inspecting Orchestrator reasoning_chain) ---
 LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY", "")
 LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "investment-research-platform")
 
+if LANGSMITH_API_KEY:
+    # LangChain's tracing SDK reads the LANGCHAIN_* names (LANGSMITH_* are
+    # just where we ask the user for them in .env); propagate them so
+    # tracing actually activates instead of silently doing nothing.
+    os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+    os.environ.setdefault("LANGCHAIN_API_KEY", LANGSMITH_API_KEY)
+    os.environ.setdefault("LANGCHAIN_PROJECT", LANGSMITH_PROJECT)
+
 # --- Checkpointer ---
 CHECKPOINT_DB = os.getenv("CHECKPOINT_DB", "checkpoints.db")
+
+# --- Committee approval (Checkpoint #2) ---
+# Caps the revise -> re-review cycle so a stuck committee/feedback loop
+# can't run forever; past this, the session is force-closed as rejected.
+MAX_REVISION_ROUNDS = 3

@@ -108,13 +108,7 @@ def _pull_yfinance_raw(ticker: str) -> Optional[dict]:
     statement_periods = len(inc.columns) if inc is not None and not inc.empty else 0
     latest_period_date = inc.columns[0].to_pydatetime() if statement_periods else None
 
-    return {
-        "raw": raw,
-        "statement_periods": statement_periods,
-        "latest_period_date": latest_period_date,
-        "industry": info.get("industry"),
-        "sector": info.get("sector"),
-    }
+    return {"raw": raw, "statement_periods": statement_periods, "latest_period_date": latest_period_date}
 
 
 # ---------------------------------------------------------------------------
@@ -209,18 +203,7 @@ def _pull_alpha_vantage_raw(ticker: str) -> Optional[dict]:
         except ValueError:
             latest_period_date = None
 
-    # AV's OVERVIEW "Sector"/"Industry" fields use a different taxonomy/casing
-    # than yfinance (which data/industry_ratios.json is keyed on), so they
-    # would not match the lookup table anyway -- left None to fall through
-    # to unknown_default rather than feed in values that look plausible but
-    # never match.
-    return {
-        "raw": raw,
-        "statement_periods": len(inc_reports),
-        "latest_period_date": latest_period_date,
-        "industry": None,
-        "sector": None,
-    }
+    return {"raw": raw, "statement_periods": len(inc_reports), "latest_period_date": latest_period_date}
 
 
 # ---------------------------------------------------------------------------
@@ -295,15 +278,13 @@ def _interpret_financials(company_name: str, ticker: str, universal: dict,
 
 def financial_analyst_node(state: dict) -> dict:
     """
-    Runs in parallel with Sentiment Analyst and Macro & Industry Analyst
-    (flat 3-way fan-out from Checkpoint #1 -- see graph.py). Since parallel
-    sibling nodes can't see each other's writes within the same step, this
-    node resolves industry/sector itself (already-fetched data from its own
-    yfinance pull, effectively free) rather than depending on a separate
-    upstream "Industry Identification" node.
+    Waits on the Industry Identification node (see graph.py) for
+    `industry`/`sector`, and runs in parallel with Macro & Industry Analyst.
     """
     ticker = state.get("ticker")
     company_name = state.get("company_name")
+    industry = state.get("industry")
+    sector = state.get("sector")
     now = datetime.now(timezone.utc).isoformat()
 
     pull = _pull_yfinance_raw(ticker)
@@ -321,8 +302,6 @@ def financial_analyst_node(state: dict) -> dict:
         }
 
     raw = pull["raw"]
-    industry = pull.get("industry")
-    sector = pull.get("sector")
     quality = _assess_data_quality(pull)
 
     universal = compute_universal_ratios(raw)
@@ -340,8 +319,6 @@ def financial_analyst_node(state: dict) -> dict:
         "industry_ratios": industry_ratio_results,
         "ratio_interpretation": interpretation,
         "financial_data_as_of": now,
-        "industry": industry,
-        "sector": sector,
     }
 
 

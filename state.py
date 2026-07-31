@@ -75,11 +75,22 @@ class InvestmentResearchState(MessagesState):
     evidence_pattern_classification: Optional[str]
     data_gaps: Optional[list]               # which specialists failed, flagged transparently
 
+    # Draft investment recommendation -- a directional analyst-style thesis
+    # conclusion (e.g. "constructive", "cautious", "neutral" + rationale),
+    # drafted FOR the investment committee's review, never surfaced to an
+    # end investor until Checkpoint #2 approves it. Regenerated on each
+    # revision round to incorporate committee_feedback (thesis update as
+    # new input arrives).
+    draft_recommendation: Optional[str]
+    revision_count: Optional[int]
+
     # ------------------------------------------------------------------
-    # HITL checkpoints / Q&A
+    # HITL checkpoints / Q&A / Committee approval
     # ------------------------------------------------------------------
     checkpoint_1_approved: Optional[bool]
     checkpoint_2_qa_history: Optional[list]   # [{question, routed_to_agent, answer}, ...]
+    committee_decision: Optional[Literal["approved", "rejected", "revise"]]
+    committee_feedback: Optional[str]         # revision instructions, or documented rationale
     user_takeaway: Optional[str]
 
     # ------------------------------------------------------------------
@@ -134,8 +145,12 @@ def get_initial_state(raw_user_input: str) -> dict:
         "invalidation_triggers": None,
         "evidence_pattern_classification": None,
         "data_gaps": None,
+        "draft_recommendation": None,
+        "revision_count": 0,
         "checkpoint_1_approved": None,
         "checkpoint_2_qa_history": [],
+        "committee_decision": None,
+        "committee_feedback": None,
         "user_takeaway": None,
         "status": "intake",
     }

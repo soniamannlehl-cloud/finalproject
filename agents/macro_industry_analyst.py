@@ -231,28 +231,11 @@ def _interpret_macro(company_name: Optional[str], industry: Optional[str], secto
     return (response.content if hasattr(response, "content") else str(response)).strip()
 
 
-def _resolve_industry_sector(ticker: Optional[str]) -> tuple:
-    """
-    Runs in parallel with Sentiment Analyst and Financial Analyst (flat
-    3-way fan-out from Checkpoint #1 -- see graph.py), so this node can't
-    rely on a separate upstream "Industry Identification" node's output
-    (parallel siblings don't see each other's writes in the same step).
-    Resolves its own copy via a quick yfinance lookup instead; intentionally
-    does NOT write industry/sector back to shared state (Financial Analyst
-    is the sole writer of those fields, avoiding a dual-write conflict).
-    """
-    if not ticker:
-        return None, None
-    try:
-        info = yf.Ticker(ticker).info or {}
-    except Exception:
-        return None, None
-    return info.get("industry"), info.get("sector")
-
-
 def macro_industry_analyst_node(state: dict) -> dict:
+    """Waits on the Industry Identification node (see graph.py) for `industry`/`sector`."""
     company_name = state.get("company_name")
-    industry, sector = _resolve_industry_sector(state.get("ticker"))
+    industry = state.get("industry")
+    sector = state.get("sector")
     now = datetime.now(timezone.utc).isoformat()
 
     macro_indicators = _fetch_macro_indicators()

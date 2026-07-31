@@ -67,6 +67,7 @@ def execute_task(request: A2ATaskRequest) -> A2ATaskResult:
         state: TaskState,
         *,
         evidence=None,
+        claims=None,
         confidence: float = 0.0,
         error: str | None = None,
         degraded: str | None = None,
@@ -79,6 +80,7 @@ def execute_task(request: A2ATaskRequest) -> A2ATaskResult:
             capability=request.capability,
             state=state,
             evidence=evidence or [],
+            claims=claims or [],
             confidence=confidence,
             error=error,
             degraded_reason=degraded,
@@ -105,7 +107,9 @@ def execute_task(request: A2ATaskRequest) -> A2ATaskResult:
     )
 
     try:
-        evidence, confidence, degraded = handler(request.inputs, request.run_id, request.task_id)
+        evidence, confidence, degraded, claims = handler(
+            request.inputs, request.run_id, request.task_id
+        )
     except ValueError as e:
         # Bad inputs -- retrying identical inputs cannot help.
         log.warning("invalid inputs for %s: %s", request.capability, e)
@@ -120,6 +124,7 @@ def execute_task(request: A2ATaskRequest) -> A2ATaskResult:
     return _finish(
         state,
         evidence=evidence,
+        claims=claims,
         confidence=confidence,
         degraded=degraded,
         agent_id=agent_id,

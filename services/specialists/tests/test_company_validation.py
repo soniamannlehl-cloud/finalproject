@@ -89,13 +89,20 @@ class TestNoMatch:
 
 class TestA2AHandler:
     @patch("app.agents.company_validation.search_companies")
-    def test_returns_evidence_confidence_and_degradation(self, mock_search):
+    def test_conforms_to_the_shared_handler_contract(self, mock_search):
+        """
+        All capability handlers return the same 4-tuple so the A2A server can
+        dispatch them uniformly: (evidence, confidence, degraded, claims).
+        """
         mock_search.return_value = [match()]
-        evidence, confidence, degraded = company_validation.handle({"query": "NVDA"}, "r1", "t1")
+        evidence, confidence, degraded, claims = company_validation.handle(
+            {"query": "NVDA"}, "r1", "t1"
+        )
 
         assert len(evidence) == 1
         assert 0.0 <= confidence <= 1.0
         assert degraded is None
+        assert claims == []
 
     @pytest.mark.parametrize("inputs", [{}, {"query": ""}, None])
     def test_missing_query_raises_for_the_a2a_layer_to_convert(self, inputs):

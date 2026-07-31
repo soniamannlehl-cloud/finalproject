@@ -143,13 +143,14 @@ def validate_company(query: str, run_id: str, task_id: str) -> tuple[Evidence, V
     return _build_evidence(run_id, task_id, content, confidence), ValidationStatus.RESOLVED
 
 
-def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidence], float, str | None]:
+def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list, float, str | None, list]:
     """
     A2A entrypoint for the `company.validate` capability.
 
-    Returns (evidence, confidence, degraded_reason). Raising here is
-    intentional on provider failure: the A2A server converts it into a
-    FAILED task result, which the Director can retry.
+    Returns the standard handler contract: (evidence, confidence,
+    degraded_reason, claims). Raising here is intentional on provider
+    failure -- the A2A server converts it into a FAILED task result, which
+    the Director can retry.
     """
     query = (inputs or {}).get("query", "")
     if not query:
@@ -160,4 +161,4 @@ def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidence], flo
     except ProviderError:
         raise
 
-    return [evidence], evidence.confidence, None
+    return [evidence], evidence.confidence, None, []

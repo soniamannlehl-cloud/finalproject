@@ -1,23 +1,39 @@
 """
 StateGraph assembly.
 
-The topology here is STATIC and stays static. Dynamic behavior comes from
-the plan carried in state and dispatched via the `Send` API (M2+), never
-from rebuilding the graph per request -- a per-request graph would break
-checkpoint compatibility across resumes and fragment traces.
+The topology is STATIC and stays static. Dynamic behavior comes from the
+plan carried in state and dispatched via the `Send` API -- never from
+rebuilding the graph per request, which would break checkpoint
+compatibility across resumes and fragment traces.
 
-M1 topology:
+M2 topology:
 
-    START -> validate_company -> END
+    START
+      -> validate_company        (Checkpoint #1 interrupt lives here)
+      -> planner                 selects industry playbook, emits task DAG
+      -> director                decides the next execution layer
+      -> [specialist_proxy] x N  parallel A2A dispatch via Send
+      -> collect                 join barrier
+      -> director                (loop while layers remain)
+      -> END
 
-`validate_company` contains the Checkpoint #1 interrupt. In M2, its
-"validated" branch routes to the Planner instead of END.
+The director <-> collect cycle is what executes a multi-layer plan: a plan
+with statements -> ratios -> valuation passes through the Director three
+times, dispatching one parallel batch each time.
 """
 
 import logging
 
 from langgraph.graph import END, START, StateGraph
 
+from ..director.director import (
+    collect_node,
+    director_node,
+    dispatch_edge,
+    route_after_collect,
+    specialist_proxy_node,
+)
+from ..planning.planner import planner_node
 from .nodes.validate import route_after_validation, validate_company_node
 from .state import ResearchState
 
@@ -25,19 +41,44 @@ log = logging.getLogger(__name__)
 
 
 def build_graph() -> StateGraph:
-    """Assemble the workflow. Compiled separately so tests can supply their own checkpointer."""
+    """Assemble the workflow. Compiled separately so tests can inject a checkpointer."""
     graph = StateGraph(ResearchState)
 
     graph.add_node("validate_company", validate_company_node)
+    graph.add_node("planner", planner_node)
+    graph.add_node("director", director_node)
+    graph.add_node("specialist_proxy", specialist_proxy_node)
+    graph.add_node("collect", collect_node)
 
     graph.add_edge(START, "validate_company")
+
+    # Only a human-confirmed company proceeds to cost money on research.
     graph.add_conditional_edges(
         "validate_company",
         route_after_validation,
+        {"validated": "planner", "stop": END},
+    )
+
+    graph.add_edge("planner", "director")
+
+    # The dynamic fan-out. `dispatch_edge` returns a list of Send objects --
+    # one per ready task -- so N is decided at runtime from the plan while
+    # the graph itself stays fixed at five nodes.
+    graph.add_conditional_edges(
+        "director",
+        dispatch_edge,
+        ["specialist_proxy", "collect"],
+    )
+
+    # All parallel branches converge here before the next layer is planned.
+    graph.add_edge("specialist_proxy", "collect")
+
+    graph.add_conditional_edges(
+        "collect",
+        route_after_collect,
         {
-            # M2 replaces this target with "planner".
-            "validated": END,
-            "stop": END,
+            "continue": "director",  # more layers remain
+            "done": END,             # M5 replaces this with the safety pipeline
         },
     )
 
@@ -48,8 +89,7 @@ def compile_graph(checkpointer):
     """
     Compile with a checkpointer.
 
-    A checkpointer is mandatory rather than optional: without one,
-    `interrupt()` cannot suspend and resume, so both HITL checkpoints would
-    silently fail to pause.
+    Mandatory, not optional: without one, `interrupt()` cannot suspend and
+    resume, so both HITL checkpoints would silently fail to pause.
     """
     return build_graph().compile(checkpointer=checkpointer)

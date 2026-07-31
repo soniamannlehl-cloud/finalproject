@@ -145,3 +145,95 @@ def get_company_profile(ticker: str) -> dict:
         "summary": info.get("longBusinessSummary"),
         "quote_type": info.get("quoteType"),
     }
+
+
+@retry(
+    retry=retry_if_exception_type(Exception),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
+    reraise=True,
+)
+def _raw_financials(ticker: str) -> tuple[dict, object, object, object]:
+    t = yf.Ticker(ticker)
+    return t.info or {}, t.income_stmt, t.balance_sheet, t.cashflow
+
+
+def _cell(df, label: str, col: int = 0) -> float | None:
+    """
+    Read one value from a yfinance statement frame.
+
+    Returns None rather than raising for any of the many ways this can be
+    absent (missing row, short history, NaN) so callers can treat "not
+    reported" uniformly.
+    """
+    try:
+        if df is None or getattr(df, "empty", True) or label not in df.index:
+            return None
+        value = df.loc[label].iloc[col]
+        if value is None:
+            return None
+        f = float(value)
+        return None if f != f else f  # NaN check without importing math
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def get_financials(ticker: str) -> dict:
+    """
+    Normalized financial inputs for the deterministic ratio calculations.
+
+    Prefers filed statement values over yfinance's precomputed `.info`
+    fields, falling back to `.info` only when a statement row is missing --
+    the statements are the primary source and `.info` is a convenience layer
+    that is sometimes stale or inconsistent with them.
+    """
+    try:
+        info, income, balance, cash = _raw_financials(ticker)
+    except Exception as e:  # noqa: BLE001
+        raise ProviderError(f"yfinance financials failed for {ticker!r}: {e}") from e
+
+    revenue = _cell(income, "Total Revenue") or info.get("totalRevenue")
+    if revenue is None and not info:
+        raise ProviderError(f"no financial data available for {ticker!r}")
+
+    ocf = _cell(cash, "Operating Cash Flow") or info.get("operatingCashflow")
+    capex = _cell(cash, "Capital Expenditure")
+    if capex is None and ocf is not None and info.get("freeCashflow") is not None:
+        capex = ocf - info["freeCashflow"]
+
+    shares = info.get("sharesOutstanding")
+    equity = _cell(balance, "Stockholders Equity")
+    book_value_per_share = info.get("bookValue")
+    if book_value_per_share is None and equity and shares:
+        book_value_per_share = equity / shares
+
+    periods = len(income.columns) if income is not None and not income.empty else 0
+    latest_period = (
+        income.columns[0].to_pydatetime().isoformat() if periods else None
+    )
+
+    return {
+        "ticker": ticker,
+        "currency": info.get("currency"),
+        "price": info.get("currentPrice") or info.get("regularMarketPrice"),
+        "market_cap": info.get("marketCap"),
+        "enterprise_value": info.get("enterpriseValue"),
+        "shares_outstanding": shares,
+        "eps": info.get("trailingEps"),
+        "book_value_per_share": book_value_per_share,
+        "revenue": revenue,
+        "revenue_prior": _cell(income, "Total Revenue", 1),
+        "gross_profit": _cell(income, "Gross Profit") or info.get("grossProfits"),
+        "operating_income": _cell(income, "Operating Income"),
+        "net_income": _cell(income, "Net Income") or info.get("netIncomeToCommon"),
+        "ebitda": _cell(income, "EBITDA") or info.get("ebitda"),
+        "total_debt": _cell(balance, "Total Debt") or info.get("totalDebt"),
+        "total_equity": equity,
+        "total_assets": _cell(balance, "Total Assets"),
+        "current_assets": _cell(balance, "Current Assets"),
+        "current_liabilities": _cell(balance, "Current Liabilities"),
+        "operating_cash_flow": ocf,
+        "capex": capex,
+        "statement_periods": periods,
+        "latest_period": latest_period,
+    }

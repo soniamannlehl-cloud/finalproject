@@ -34,6 +34,7 @@ from ..director.director import (
     specialist_proxy_node,
 )
 from ..planning.planner import planner_node
+from ..thesis.agent import thesis_node
 from .nodes.validate import route_after_validation, validate_company_node
 from .state import ResearchState
 
@@ -49,6 +50,7 @@ def build_graph() -> StateGraph:
     graph.add_node("director", director_node)
     graph.add_node("specialist_proxy", specialist_proxy_node)
     graph.add_node("collect", collect_node)
+    graph.add_node("thesis", thesis_node)
 
     graph.add_edge(START, "validate_company")
 
@@ -73,8 +75,12 @@ def build_graph() -> StateGraph:
     # All parallel branches converge here before the next layer is planned.
     graph.add_edge("specialist_proxy", "collect")
 
+    # Thesis updates after EVERY batch, not once at the end -- that is what
+    # makes it a living thesis rather than a final summary.
+    graph.add_edge("collect", "thesis")
+
     graph.add_conditional_edges(
-        "collect",
+        "thesis",
         route_after_collect,
         {
             "continue": "director",  # more layers remain

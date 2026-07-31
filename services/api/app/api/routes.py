@@ -16,8 +16,10 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from ..db import checkpointer as db
+from ..evidence import repository as evidence_repo
 from ..graph.builder import compile_graph
 from ..graph.state import initial_state
+from ..thesis import repository as thesis_repo
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -195,3 +197,77 @@ async def get_run_status(run_id: str) -> dict:
 async def list_recent_runs(limit: int = 20) -> dict:
     runs = await db.list_runs(limit)
     return {"runs": runs, "count": len(runs)}
+
+
+@router.get("/{run_id}/evidence")
+async def get_run_evidence(run_id: str) -> dict:
+    """
+    All evidence gathered, with citations.
+
+    This is what makes every downstream claim auditable: the report cites
+    evidence IDs, and this endpoint resolves them back to source, timestamp,
+    and confidence.
+    """
+    if await db.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail=f"run {run_id} not found")
+
+    records = await evidence_repo.get_evidence_for_run(run_id)
+    return {
+        "run_id": run_id,
+        "count": len(records),
+        "by_capability": await evidence_repo.evidence_summary(run_id),
+        "evidence": [
+            {
+                "evidence_id": r["evidence_id"],
+                "capability": r["capability"],
+                "agent_id": r["agent_id"],
+                "source_type": r["source_type"],
+                "source_name": r["source_name"],
+                "source_url": r["source_url"],
+                "citation": r["citation"],
+                "summary": r["summary"],
+                "confidence": r["confidence"],
+                "provider_degraded": r["provider_degraded"],
+                "retrieved_at": r["retrieved_at"],
+            }
+            for r in records
+        ],
+    }
+
+
+@router.get("/{run_id}/thesis")
+async def get_run_thesis(run_id: str) -> dict:
+    """
+    The thesis and its full revision history.
+
+    Returns every version rather than only the current one, because the
+    platform's claim is that the thesis EVOLVES as evidence arrives -- and
+    that is only demonstrable by showing the trajectory.
+    """
+    if await db.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail=f"run {run_id} not found")
+
+    history = await thesis_repo.get_history(run_id)
+    current = history.current
+
+    return {
+        "run_id": run_id,
+        "version_count": len(history.versions),
+        "current": current.model_dump(mode="json") if current else None,
+        "confidence_trajectory": history.confidence_trajectory(),
+        "history": [
+            {
+                "version": v.version,
+                "parent_version": v.parent_version,
+                "stance": v.stance.value,
+                "confidence": v.confidence,
+                "statement": v.statement,
+                "change_reason": v.change_reason,
+                "triggered_by": v.triggered_by,
+                "supporting_count": len(v.supporting_claim_ids),
+                "contradicting_count": len(v.contradicting_claim_ids),
+                "created_at": v.created_at,
+            }
+            for v in history.versions
+        ],
+    }

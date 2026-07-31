@@ -84,6 +84,8 @@ class ResearchState(TypedDict, total=False):
 
     # --- thesis (M4) --------------------------------------------------------
     thesis_version: Annotated[int | None, keep_last]
+    thesis_stance: Annotated[str | None, keep_last]
+    thesis_confidence: Annotated[float | None, keep_last]
 
     # --- safety (M5) --------------------------------------------------------
     safety_report: dict | None
@@ -130,6 +132,8 @@ def initial_state(run_id: str, raw_query: str, trace_id: str | None = None) -> R
         task_status={},
         errors=[],
         thesis_version=None,
+        thesis_stance=None,
+        thesis_confidence=None,
         safety_report=None,
         evidence_score=None,
         recommendation=None,

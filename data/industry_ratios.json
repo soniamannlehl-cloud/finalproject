@@ -1,0 +1,87 @@
+{
+  "_comment": "Lookup table for the Financial Analyst Agent. `universal_ratios` are computed for every company. `industry_ratio_sets` are looked up by yfinance's `.info['industry']` string first; if no exact match, fall back to `sector_defaults` keyed by yfinance's `.info['sector']`; if the sector itself isn't listed, use `unknown_default` (universal ratios only). All ratio names map 1:1 to a deterministic function in tools/financial_calculations.py -- the LLM never computes these, it only interprets the results.",
+
+  "universal_ratios": [
+    "pe_ratio",
+    "eps",
+    "pb_ratio",
+    "revenue_growth",
+    "gross_margin",
+    "operating_margin",
+    "debt_to_equity",
+    "free_cash_flow"
+  ],
+
+  "industry_ratio_sets": {
+    "Banks - Regional": ["return_on_equity", "return_on_assets", "efficiency_ratio", "interest_coverage_ratio"],
+    "Banks - Diversified": ["return_on_equity", "return_on_assets", "efficiency_ratio", "interest_coverage_ratio"],
+    "Insurance - Diversified": ["return_on_equity", "return_on_assets", "current_ratio"],
+    "Insurance - Property & Casualty": ["return_on_equity", "return_on_assets", "current_ratio"],
+    "Insurance - Life": ["return_on_equity", "return_on_assets", "current_ratio"],
+    "Capital Markets": ["return_on_equity", "return_on_assets", "efficiency_ratio"],
+    "Asset Management": ["return_on_equity", "efficiency_ratio"],
+
+    "Airlines": ["asset_turnover", "debt_to_ebitda", "interest_coverage_ratio", "current_ratio"],
+    "Aerospace & Defense": ["asset_turnover", "debt_to_ebitda", "interest_coverage_ratio"],
+    "Railroads": ["asset_turnover", "debt_to_ebitda", "ebitda_margin"],
+    "Trucking": ["asset_turnover", "debt_to_ebitda", "current_ratio"],
+
+    "Software - Infrastructure": ["rd_to_revenue", "ebitda_margin", "current_ratio"],
+    "Software - Application": ["rd_to_revenue", "ebitda_margin", "current_ratio"],
+    "Semiconductors": ["rd_to_revenue", "ebitda_margin", "inventory_turnover", "asset_turnover"],
+    "Consumer Electronics": ["rd_to_revenue", "inventory_turnover", "asset_turnover"],
+    "Internet Content & Information": ["rd_to_revenue", "ebitda_margin", "current_ratio"],
+    "Internet Retail": ["inventory_turnover", "asset_turnover", "ebitda_margin"],
+
+    "Drug Manufacturers - General": ["rd_to_revenue", "ebitda_margin", "current_ratio", "interest_coverage_ratio"],
+    "Drug Manufacturers - Specialty & Generic": ["rd_to_revenue", "ebitda_margin", "current_ratio"],
+    "Biotechnology": ["rd_to_revenue", "current_ratio", "quick_ratio"],
+    "Medical Devices": ["rd_to_revenue", "ebitda_margin", "inventory_turnover"],
+    "Healthcare Plans": ["return_on_equity", "ebitda_margin", "current_ratio"],
+
+    "Oil & Gas Integrated": ["debt_to_ebitda", "fcf_yield", "interest_coverage_ratio"],
+    "Oil & Gas E&P": ["debt_to_ebitda", "fcf_yield", "current_ratio"],
+    "Oil & Gas Midstream": ["debt_to_ebitda", "dividend_payout_ratio", "interest_coverage_ratio"],
+    "Oil & Gas Refining & Marketing": ["debt_to_ebitda", "fcf_yield", "asset_turnover"],
+
+    "Utilities - Regulated Electric": ["dividend_payout_ratio", "debt_to_ebitda", "interest_coverage_ratio"],
+    "Utilities - Regulated Gas": ["dividend_payout_ratio", "debt_to_ebitda", "interest_coverage_ratio"],
+    "Utilities - Diversified": ["dividend_payout_ratio", "debt_to_ebitda", "interest_coverage_ratio"],
+
+    "REIT - Diversified": ["dividend_payout_ratio", "debt_to_ebitda", "fcf_yield"],
+    "REIT - Residential": ["dividend_payout_ratio", "debt_to_ebitda", "fcf_yield"],
+    "REIT - Retail": ["dividend_payout_ratio", "debt_to_ebitda", "fcf_yield"],
+    "REIT - Office": ["dividend_payout_ratio", "debt_to_ebitda", "fcf_yield"],
+    "Real Estate Services": ["return_on_assets", "asset_turnover", "current_ratio"],
+
+    "Auto Manufacturers": ["inventory_turnover", "asset_turnover", "debt_to_ebitda"],
+    "Auto Parts": ["inventory_turnover", "asset_turnover", "current_ratio"],
+    "Specialty Retail": ["inventory_turnover", "current_ratio", "asset_turnover"],
+    "Grocery Stores": ["inventory_turnover", "asset_turnover", "ebitda_margin"],
+    "Restaurants": ["asset_turnover", "ebitda_margin", "current_ratio"],
+    "Apparel Retail": ["inventory_turnover", "current_ratio", "ebitda_margin"],
+    "Packaged Foods": ["inventory_turnover", "ebitda_margin", "dividend_payout_ratio"],
+    "Beverages - Non-Alcoholic": ["ebitda_margin", "dividend_payout_ratio", "asset_turnover"],
+
+    "Telecom Services": ["debt_to_ebitda", "dividend_payout_ratio", "interest_coverage_ratio"],
+    "Chemicals": ["asset_turnover", "debt_to_ebitda", "ebitda_margin"],
+    "Steel": ["asset_turnover", "debt_to_ebitda", "current_ratio"],
+    "Gold": ["debt_to_ebitda", "current_ratio", "asset_turnover"]
+  },
+
+  "sector_defaults": {
+    "Technology": ["rd_to_revenue", "ebitda_margin", "current_ratio"],
+    "Healthcare": ["rd_to_revenue", "ebitda_margin", "current_ratio"],
+    "Financial Services": ["return_on_equity", "return_on_assets", "efficiency_ratio"],
+    "Consumer Cyclical": ["inventory_turnover", "asset_turnover", "current_ratio"],
+    "Consumer Defensive": ["inventory_turnover", "ebitda_margin", "dividend_payout_ratio"],
+    "Energy": ["debt_to_ebitda", "fcf_yield", "interest_coverage_ratio"],
+    "Industrials": ["asset_turnover", "debt_to_ebitda", "current_ratio"],
+    "Basic Materials": ["asset_turnover", "debt_to_ebitda", "ebitda_margin"],
+    "Real Estate": ["dividend_payout_ratio", "debt_to_ebitda", "fcf_yield"],
+    "Utilities": ["dividend_payout_ratio", "debt_to_ebitda", "interest_coverage_ratio"],
+    "Communication Services": ["debt_to_ebitda", "ebitda_margin", "dividend_payout_ratio"]
+  },
+
+  "unknown_default": []
+}

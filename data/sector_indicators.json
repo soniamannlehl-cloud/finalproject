@@ -1,0 +1,80 @@
+{
+  "_comment": "Lookup table for the Macro & Industry Analyst Agent. `sector_etfs` gives the universal sector ETF (every company gets its sector's ETF performance, via yfinance historical prices). `industry_indicators` gives industry-specific macro indicators pulled from FRED via tools/macro_calculations.py, looked up by yfinance's `.info['industry']` string first, falling back to `sector_default_indicators` keyed by `.info['sector']`, falling back to an empty list (universal macro indicators only) if neither matches.",
+
+  "sector_etfs": {
+    "Technology": "XLK",
+    "Healthcare": "XLV",
+    "Financial Services": "XLF",
+    "Consumer Cyclical": "XLY",
+    "Consumer Defensive": "XLP",
+    "Energy": "XLE",
+    "Industrials": "XLI",
+    "Basic Materials": "XLB",
+    "Real Estate": "XLRE",
+    "Utilities": "XLU",
+    "Communication Services": "XLC"
+  },
+
+  "industry_indicators": {
+    "Banks - Regional": [
+      {"name": "10-Year Treasury Yield", "fred_series": "DGS10", "why": "Bank net interest margins move with long-term rates"}
+    ],
+    "Banks - Diversified": [
+      {"name": "10-Year Treasury Yield", "fred_series": "DGS10", "why": "Bank net interest margins move with long-term rates"}
+    ],
+    "Insurance - Diversified": [
+      {"name": "10-Year Treasury Yield", "fred_series": "DGS10", "why": "Insurers invest premiums in long-duration bonds"}
+    ],
+    "Insurance - Life": [
+      {"name": "10-Year Treasury Yield", "fred_series": "DGS10", "why": "Life insurer investment income moves with long-term rates"}
+    ],
+    "REIT - Diversified": [
+      {"name": "10-Year Treasury Yield", "fred_series": "DGS10", "why": "REIT valuations and borrowing costs are rate-sensitive"},
+      {"name": "30-Year Mortgage Rate", "fred_series": "MORTGAGE30US", "why": "Financing costs affect REIT acquisitions and refinancing"}
+    ],
+    "REIT - Residential": [
+      {"name": "30-Year Mortgage Rate", "fred_series": "MORTGAGE30US", "why": "Mortgage rates affect renter demand and refinancing costs"}
+    ],
+    "Real Estate Services": [
+      {"name": "30-Year Mortgage Rate", "fred_series": "MORTGAGE30US", "why": "Mortgage rates drive transaction volume"}
+    ],
+    "Utilities - Regulated Electric": [
+      {"name": "10-Year Treasury Yield", "fred_series": "DGS10", "why": "Utility stocks trade like bond proxies, sensitive to rates"}
+    ],
+    "Utilities - Regulated Gas": [
+      {"name": "Henry Hub Natural Gas Spot Price", "fred_series": "DHHNGSP", "why": "Direct input cost for gas utilities"}
+    ],
+    "Airlines": [
+      {"name": "WTI Crude Oil Price", "fred_series": "DCOILWTICO", "why": "Jet fuel is airlines' largest variable cost"}
+    ],
+    "Oil & Gas Integrated": [
+      {"name": "WTI Crude Oil Price", "fred_series": "DCOILWTICO", "why": "Primary revenue driver for oil producers"}
+    ],
+    "Oil & Gas E&P": [
+      {"name": "WTI Crude Oil Price", "fred_series": "DCOILWTICO", "why": "Primary revenue driver for oil producers"}
+    ],
+    "Oil & Gas Refining & Marketing": [
+      {"name": "WTI Crude Oil Price", "fred_series": "DCOILWTICO", "why": "Input cost for refiners; crack spread driver"}
+    ],
+    "Auto Manufacturers": [
+      {"name": "10-Year Treasury Yield", "fred_series": "DGS10", "why": "Auto loan rates track long-term Treasury yields"}
+    ]
+  },
+
+  "sector_default_indicators": {
+    "Financial Services": [
+      {"name": "10-Year Treasury Yield", "fred_series": "DGS10", "why": "Financial sector margins broadly track long-term rates"}
+    ],
+    "Real Estate": [
+      {"name": "10-Year Treasury Yield", "fred_series": "DGS10", "why": "Real estate valuations are rate-sensitive"}
+    ],
+    "Utilities": [
+      {"name": "10-Year Treasury Yield", "fred_series": "DGS10", "why": "Utility stocks trade like bond proxies"}
+    ],
+    "Energy": [
+      {"name": "WTI Crude Oil Price", "fred_series": "DCOILWTICO", "why": "Energy sector revenue tracks oil prices broadly"}
+    ]
+  },
+
+  "unknown_default": []
+}

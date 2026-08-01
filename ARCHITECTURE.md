@@ -75,50 +75,57 @@ never choose what to research next.
 
 ## 2. Architecture diagram
 
-### Figure 1 — System context (logical view)
+### Figure 1 — System architecture (service topology)
+
+This diagram shows **how the deployable services connect**. The frontend talks
+only to the API. The API orchestrates everything, calls specialists and
+committee over HTTP, and is the **only** service that reads/writes Postgres.
 
 ```mermaid
 flowchart TB
-    User([User / Analyst])
-    UI[Next.js Frontend :3000]
+    User([User])
 
-    subgraph Control["API Service — Control Plane (LangGraph)"]
-        WF[Workflow Engine]
-        PL[Planner]
-        DR[Director]
-        TH[Thesis Agent]
-        SA[Safety Pipeline]
-        SY[Synthesizer]
-        RP[Report Generator]
+    UI["Frontend :3000<br/>(Next.js dashboard)"]
+
+    subgraph API["API Service :8080 — Control Plane<br/>(LangGraph + FastAPI)"]
+        direction TB
+        WF["Workflow orchestrator<br/>validate → plan → dispatch → thesis →<br/>safety → synthesize → report → HITL"]
     end
 
-    subgraph Data["Specialists Service — Data Plane (A2A)"]
-        SP[10 Research Agents]
-        TOOLS[FMP · yfinance · SEC · News · Polygon]
+    subgraph SPEC["Specialists Service :8081 — Data Plane<br/>(A2A server)"]
+        AG["10 research agents"]
+        TOOLS["External sources<br/>yfinance · SEC · FMP · News · Polygon"]
     end
 
-    subgraph Delib["Committee Service (CrewAI)"]
-        BULL[Bull Analyst]
-        BEAR[Bear Analyst]
-        CIO[CIO]
+    subgraph COM["Committee Service :8082 — Deliberation<br/>(CrewAI)"]
+        BBC["Bull → Bear → CIO<br/>(debates evidence brief only)"]
     end
 
-    DB[(PostgreSQL)]
+    DB[("PostgreSQL :5432<br/>evidence · claims · thesis ·<br/>checkpoints · reports")]
 
     User --> UI
-    UI <-->|REST| WF
-    WF --> PL --> DR
-    DR -->|A2A HTTP| SP
-    SP --> TOOLS
-    SP --> DB
-    WF --> TH --> SA
-    SA -->|A2A HTTP| Delib
-    BULL --> BEAR --> CIO
-    Delib --> SY --> RP
-    TH --> DB
-    RP --> DB
-    WF --> DB
+    UI <-->|REST| API
+
+    API -->|"A2A / HTTP<br/>(dispatch tasks, receive evidence)"| AG
+    AG --> TOOLS
+
+    API -->|"HTTP<br/>(send evidence brief, receive proposal)"| COM
+
+    API <-->|"SQL<br/>(persist & load all run data)"| DB
 ```
+
+**What this diagram intentionally omits:** internal LangGraph node names and
+the research loop (director dispatches parallel tasks layer-by-layer until the
+plan is complete). That detail is in Figure 2 (sequence) and Figure 4 (graph).
+
+**Common misreadings to avoid:**
+
+| Incorrect | Actual behavior |
+|-----------|-----------------|
+| Frontend calls specialists or committee directly | Frontend calls **API only** |
+| Specialists write to Postgres | Specialists return evidence over A2A; **API persists** to Postgres |
+| Safety pipeline calls the committee | **Committee node** in the API runs after safety completes |
+| Synthesizer / report live in the committee service | Both run **inside the API** after the committee returns its proposal |
 
 ### Figure 2 — End-to-end data flow
 

@@ -1,228 +1,252 @@
 # AI Investment Research Analyst
 
-A multi-agent system that simulates how a professional investment research
-firm performs due diligence on a publicly traded company: it plans an
-industry-aware research strategy, dispatches specialist agents to gather
-evidence, maintains a living investment thesis, subjects its conclusions to
-safety review, runs an adversarial investment committee, generates a
-structured report, and requires human approval before any recommendation is
-finalized.
+**A multi-agent AI system that simulates how a professional investment research firm analyzes a public company — with cited evidence, human approval gates, and the ability to refuse a recommendation when data is insufficient.**
 
-The emphasis is architecture, planning, explainability, and engineering
-discipline — not generating investment advice. Every factual statement in
-the output is traceable to a specific piece of retrieved evidence, and the
-system refuses to issue a directional call when evidence is insufficient.
-
-> ⚠️ Academic project. Not investment advice.
+> ⚠️ **Academic capstone project.** This is not investment advice.
 
 ---
 
-## What this system does
+## The Problem
 
-| Feature | Description |
-|---|---|
-| **Web dashboard** | Next.js UI at `:3000` — start runs, approve checkpoints, view evidence, thesis, safety, and reports |
-| **Industry-aware planning** | 13 industry profiles (Technology, Banking, REIT, Healthcare, …) select metrics, valuation methods, and risk rules per company |
-| **10 research specialists** | 11 capabilities over A2A — financials, valuation, risk, peers, news, SEC, earnings, investment drivers |
-| **Living thesis** | Versioned stance + structured analyst framework (core question, drivers, risks, catalysts, valuation view) |
-| **Safety pipeline** | Deterministic coverage/citation checks + semantic hallucination/contradiction detection |
-| **Investment committee** | CrewAI Bull / Bear / CIO debate from a capped evidence brief only |
-| **Policy gate** | Deterministic synthesizer overrides committee when evidence is insufficient |
-| **Two HITL checkpoints** | Confirm company before spend; review full report before finalize (with replan option) |
-| **Guardrails** | Bounded retries/replans, run-scoped evidence IDs, LLM never computes financial numbers |
+Investment research is slow, expensive, and easy to get wrong. A single analyst must pull financials, compare peers, read filings, track news, assess risks, and form a view — often under time pressure. When AI is added to this workflow, new problems appear: models **invent numbers**, **skip verification**, and **always sound confident** even when evidence is thin.
 
-**End-to-end workflow:**
-
-```
-validate → planner → director ⇄ specialists → collect → thesis → safety
-  → committee → synthesizer → report → HITL #2
-```
+The challenge is not “make an LLM summarize a 10-K.” It is: **how do you design an autonomous system that plans its work, gathers traceable evidence, checks its own conclusions, and knows when to stop?**
 
 ---
 
-## Architecture at a glance
+## The Solution
 
-Four runtime components plus shared contracts:
+This project models a **research desk**, not a chatbot. You enter a ticker; the system:
 
-| Component | Port | Framework | Role |
-|---|---|---|---|
-| `frontend` | 3000 | **Next.js** | Web UI — research dashboard and HITL checkpoints |
-| `api` | 8080 | **LangGraph** | Control plane — workflow, HITL, planning, safety, reports |
-| `specialists` | 8081 | **A2A** | Data plane — 10 research agents + provider APIs |
-| `committee` | 8082 | **CrewAI** | Deliberation — Bull / Bear / CIO debate |
-| `postgres` | 5432 | — | Evidence repository + workflow checkpoints |
+1. **Confirms the company** with you before spending time or API cost
+2. **Plans** an industry-specific research strategy (a bank is not analyzed like a REIT)
+3. **Dispatches specialist agents** in parallel to gather real data from market and regulatory sources
+4. **Builds a living investment thesis** that updates as evidence arrives
+5. **Runs safety checks** on coverage, citations, and contradictions
+6. **Convenes an investment committee** — Bull, Bear, and CIO — that debates only from verified evidence
+7. **Generates a structured report** and waits for your **final approval** before anything is finalized
 
-Three Python services share **no dependency tree** — they communicate only
-through HTTP and the shared `packages/contracts` Pydantic schemas. A2A is a
-real network protocol: specialists are separately addressable and discovered
-at runtime.
+If evidence is too weak, the system returns **Insufficient Evidence** instead of a reckless Buy/Sell call.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for framework justification, data
-flow, and measured tradeoffs.
+---
+
+## How It Works
+
+```
+You enter a ticker
+       │
+       ▼
+Checkpoint #1 ──▶ Confirm company
+       │
+       ▼
+Planner selects industry profile ──▶ Research plan (task DAG)
+       │
+       ▼
+Director dispatches specialists in parallel ──▶ Evidence stored in Postgres
+       │
+       ▼
+Thesis updates ──▶ Safety review ──▶ Committee debate (Bull / Bear / CIO)
+       │
+       ▼
+Policy gate applies rules ──▶ Report generated
+       │
+       ▼
+Checkpoint #2 ──▶ You approve, reject, or request more research
+```
+
+**Design principle:** the control plane *decides*, the data plane *retrieves*, the committee *argues*. No single agent does everything, and no recommendation ships without a human in the loop.
+
+---
+
+## Key Features
+
+| Feature | Why it matters |
+|---------|----------------|
+| **Web dashboard** | Start research, watch progress, and approve checkpoints in a browser |
+| **Industry-aware planning** | 13 industry profiles tailor metrics, valuation methods, and risk rules |
+| **10 specialist agents** | Financials, valuation, risk, peers, news, SEC filings, earnings, and more |
+| **Living investment thesis** | Versioned stance with a structured analyst framework (drivers, risks, catalysts) |
+| **Safety pipeline** | Coverage checks, citation integrity, stale-data flags, contradiction detection |
+| **Adversarial committee** | Bull and Bear must argue opposing cases before the CIO decides |
+| **Deterministic policy gate** | Rules — not the LLM — have the final say on Buy / Hold / Sell |
+| **Two human checkpoints** | Confirm before research; review the full report before finalize |
+| **Graceful degradation** | Runs without paid data APIs; gaps are disclosed, not hidden |
+
+---
+
+## System Architecture
+
+The system is split into **three independent Python services** plus a web frontend. Each service uses the framework best suited to its role, connected over HTTP with a shared contract layer.
 
 ```
   Next.js frontend (:3000)
         │
         ▼
   ┌───────────────┐   A2A/HTTP   ┌──────────────────┐
-  │ api           │─────────────▶│ specialists      │──▶ FMP · yfinance
-  │ (LangGraph)   │              │ (A2A + tools)    │    SEC · NewsAPI
-  │ control plane │              │ data plane       │    Tavily · Polygon
+  │ API service   │─────────────▶│ Specialists      │──▶ Yahoo Finance · SEC
+  │ (LangGraph)   │              │ (research agents)│    FMP · News · Polygon
+  │ Control plane │              │ Data plane       │
   └───────┬───────┘              └──────────────────┘
           │ A2A/HTTP             ┌──────────────────┐
-          ├─────────────────────▶│ committee        │
+          ├─────────────────────▶│ Committee        │
           │                      │ (CrewAI)         │
+          │                      │ Bull · Bear · CIO│
           │                      └──────────────────┘
           ▼
-     Postgres  ◀── evidence, thesis history, checkpoints
+     PostgreSQL  ◀── evidence, thesis history, workflow checkpoints
+```
+
+| Component | Port | Role |
+|-----------|------|------|
+| Frontend | 3000 | Dashboard and human approval UI |
+| API | 8080 | Workflow orchestration, planning, safety, reports |
+| Specialists | 8081 | Data retrieval and analysis agents |
+| Committee | 8082 | Adversarial investment debate |
+| Postgres | 5432 | Persistent evidence and checkpoints |
+
+For full technical design, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+---
+
+## Technology Stack
+
+| Layer | Technologies |
+|-------|--------------|
+| **Frontend** | Next.js, React, TypeScript, Tailwind CSS |
+| **Orchestration** | LangGraph, FastAPI, PostgreSQL |
+| **Research agents** | A2A protocol, FastAPI, Python |
+| **Committee** | CrewAI |
+| **Shared contracts** | Pydantic (framework-agnostic schemas) |
+| **Data sources** | Yahoo Finance, SEC EDGAR, FMP, NewsAPI, Tavily, Polygon |
+| **Observability** | LangSmith (optional) |
+| **Infrastructure** | Docker Compose |
+
+**Course frameworks used:** LangGraph + HITL, A2A Protocol, CrewAI (minimum required: 2).
+
+---
+
+## Screenshots
+
+<!-- Add PNG/JPG files to docs/screenshots/ and uncomment the lines below -->
+
+<!--
+### Home — start a research run
+![Start research](docs/screenshots/home.png)
+
+### Checkpoint #1 — confirm company
+![Company confirmation](docs/screenshots/checkpoint-1.png)
+
+### Research in progress — evidence and thesis
+![Live research dashboard](docs/screenshots/research-progress.png)
+
+### Checkpoint #2 — review report and recommendation
+![Final approval](docs/screenshots/checkpoint-2.png)
+
+### Investment report
+![Generated report](docs/screenshots/report.png)
+-->
+
+Screenshots are not yet checked into the repo. To add them:
+
+1. Capture images while running the app at http://localhost:3000
+2. Save to `docs/screenshots/` (e.g. `home.png`, `checkpoint-2.png`)
+3. Uncomment the block above
+
+**Demo video:** `[Add your demo video link here]`
+
+---
+
+## Installation
+
+**Prerequisites**
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- An [OpenAI API key](https://platform.openai.com/api-keys)
+
+**Setup**
+
+```bash
+git clone https://github.com/soniamannlehl-cloud/finalproject.git
+cd finalproject
+
+cp .env.example .env
+# Open .env and set OPENAI_API_KEY=sk-...
 ```
 
 ---
 
-## Quick start
+## Running the Project
 
-**Prerequisites:** Docker Desktop and an OpenAI API key.
+Start all services:
 
 ```bash
-cp .env.example .env
-# Edit .env and set OPENAI_API_KEY
-
 docker compose up --build
 ```
 
-Wait until all containers are healthy, then open the UI:
-
-| URL | What it is |
-|---|---|
-| **http://localhost:3000** | **Web UI** — start research and approve recommendations |
-| http://localhost:8080/docs | API — interactive OpenAPI docs |
-| http://localhost:8081/agents | Specialist fleet discovery (A2A) |
-| http://localhost:8082/health | Committee service health |
-
-Verify services:
+Wait until containers are healthy:
 
 ```bash
 docker compose ps
-curl http://localhost:8080/health
 ```
 
-**Try a run:** open http://localhost:3000 → enter a ticker (e.g. `NVDA`) →
-confirm at Checkpoint #1 → watch evidence and thesis update → review the
-report at Checkpoint #2.
+Open the app:
 
-### API keys
+| URL | Purpose |
+|-----|---------|
+| **http://localhost:3000** | **Main UI** — start here |
+| http://localhost:8080/docs | API documentation |
+| http://localhost:8081/agents | Specialist agent registry |
 
-Only `OPENAI_API_KEY` is required. Every data provider has a keyless
-fallback (yfinance), so the platform runs gracefully without paid data
-subscriptions — missing providers reduce the evidence score and are
-**disclosed in the report** rather than silently ignored.
+**Quick test run:** enter a ticker (e.g. `NVDA` or `AAPL`) → confirm at Checkpoint #1 → watch research progress → review the report at Checkpoint #2.
+
+### Optional API keys
+
+Only `OPENAI_API_KEY` is required. Other keys improve data coverage; missing keys are handled gracefully and noted in the report.
 
 | Key | Required | Purpose |
-|---|---|---|
-| `OPENAI_API_KEY` | **Yes** | All agent reasoning |
-| `LANGSMITH_API_KEY` | Recommended | Traces every agent decision |
-| `FMP_API_KEY` | Optional | Financial statements (falls back to yfinance) |
-| `NEWSAPI_KEY` | Optional | News (falls back to Tavily) |
-| `TAVILY_API_KEY` | Optional | Web search fallback |
-| `POLYGON_API_KEY` | Optional | Market quotes via Massive (formerly Polygon.io) |
+|-----|----------|---------|
+| `OPENAI_API_KEY` | Yes | Agent reasoning |
+| `LANGSMITH_API_KEY` | Recommended | End-to-end tracing |
+| `FMP_API_KEY` | Optional | Financial statements |
+| `NEWSAPI_KEY` / `TAVILY_API_KEY` | Optional | News coverage |
+| `POLYGON_API_KEY` | Optional | Market quotes |
 
 ---
 
-## Repository layout
+## Project Structure
 
 ```
-├── packages/contracts/     Shared Pydantic schemas — the seam between services
-│                           industry_profiles/ (Technology, Banking, REIT, …)
+finalproject/
+├── frontend/                 Next.js dashboard
 ├── services/
-│   ├── api/                LangGraph workflow, HITL, planning, safety, reports
-│   ├── specialists/        ★ Research agents → specialists/app/agents/
-│   └── committee/          CrewAI Bull / Bear / CIO
-├── frontend/               Next.js + React + Tailwind dashboard
-├── ops/db/init/            Postgres schema
-├── evaluation/             Consistency harness (optional)
-└── docs/                   Guides — start with PROJECT_STRUCTURE.md & AGENTS.md
+│   ├── api/                  Workflow orchestration (LangGraph)
+│   ├── specialists/          Research agents + data tools
+│   └── committee/            Bull / Bear / CIO debate (CrewAI)
+├── packages/contracts/       Shared schemas + industry profiles
+├── docs/                     Agent reference, guardrails, demo script
+├── evaluation/               Consistency testing harness
+└── ARCHITECTURE.md           Full system design document
 ```
 
-**Where to look:**
-
-| Need | Path |
-|---|---|
-| Research agents (10) | `services/specialists/app/agents/` |
-| Capability registry | `services/specialists/app/a2a/cards.py` |
-| Workflow topology | `services/api/app/graph/builder.py` |
-| Industry profiles | `packages/contracts/src/contracts/industry_profiles/` |
-| Committee debate | `services/committee/app/crew/` |
-| Frontend UI | `frontend/src/` |
-
-See **[docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)** for a full
-folder map and **[docs/AGENTS.md](docs/AGENTS.md)** for every agent and
-what it does.
+| Looking for… | Start here |
+|--------------|------------|
+| Every agent and what it does | [docs/AGENTS.md](docs/AGENTS.md) |
+| Folder-by-folder map | [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) |
+| Guardrails and validation | [docs/GUARDRAILS.md](docs/GUARDRAILS.md) |
+| Presentation demo script | [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) |
 
 ---
 
-## Development
+## Future Improvements
 
-Run the contracts test suite (no Docker required):
-
-```bash
-python -m venv .venv-contracts
-.venv-contracts/Scripts/pip install -e packages/contracts pytest   # Windows
-.venv-contracts/Scripts/python -m pytest packages/contracts/tests -v
-```
-
-Run API unit tests (requires `pip install -e packages/contracts` and
-service dependencies in your venv):
-
-```bash
-cd services/api
-pip install -r requirements.txt
-python -m pytest tests/test_planning.py tests/test_thesis_framework.py tests/test_safety.py -v
-```
-
-Run the evaluation harness (API must be running):
-
-```bash
-pip install httpx
-python evaluation/run_consistency.py --ticker NVDA --runs 2
-```
-
----
-
-## Documentation
-
-| Doc | Contents |
-|---|---|
-| [docs/AGENTS.md](docs/AGENTS.md) | Complete agent list, capabilities, and file paths |
-| [docs/GUARDRAILS.md](docs/GUARDRAILS.md) | Validation layers, error handling, multi-agent patterns |
-| [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) | Folder map and navigation guide |
-| [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | 10-minute presentation and live demo script |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | System design, framework justification, tradeoffs |
-
----
-
-## Demo & submission
-
-For a live presentation, run `docker compose up --build` on your machine and
-**share your screen** while navigating to http://localhost:3000. The app
-runs locally — reviewers cannot open your `localhost` from their own computer
-unless you deploy it or use a tunnel.
-
-| Item | Status |
-|---|---|
-| GitHub repository | ✅ https://github.com/soniamannlehl-cloud/finalproject |
-| `ARCHITECTURE.md` in repo root | ✅ |
-| `README.md` with setup instructions | ✅ |
-| Web UI (`frontend/`) | ✅ |
-| Demo video (≤10 min) | ⬜ Record and add link below |
-| Instructor has repo access | ⬜ Grant collaborator if private |
-
-### Demo Video
-
-<!-- Replace with your Canvas/YouTube/Loom link before submitting -->
-`[Add your demo video link here]`
+- **Per-run cost controls** — token and dollar budgets per research session
+- **Cloud deployment** — hosted demo URL for reviewers (today runs locally)
+- **More industry profiles** — broader sector coverage beyond the current 13
+- **Queue-backed dispatch** — resilient specialist execution with retries at scale
+- **Richer evaluation harness** — automated consistency scoring across tickers and runs
 
 ---
 
 ## License
 
-See [LICENSE](LICENSE).
+This project is licensed under the MIT License — see [LICENSE](LICENSE).

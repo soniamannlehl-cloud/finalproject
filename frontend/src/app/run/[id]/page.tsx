@@ -121,7 +121,8 @@ export default function RunPage() {
     }
   }
 
-  const isTerminal = ["complete", "approved", "rejected", "error"].includes(status);
+  const isTerminal = ["complete", "approved", "rejected", "error", "validation_failed", "validation_rejected", "validation_unavailable"].includes(status);
+  const validationFailed = ["validation_failed", "validation_rejected", "validation_unavailable"].includes(status);
   const title = state?.company_name || state?.ticker || state?.query || "Research run";
   const evidenceCount = state?.evidence_count ?? evidence.length;
   const hasReport = Boolean(state?.report_id || checkpoint?.report_id);
@@ -150,6 +151,29 @@ export default function RunPage() {
         checkpointType={checkpoint?.type}
         hasReport={hasReport}
       />
+
+      {validationFailed && (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 p-5">
+          <h2 className="text-lg font-semibold text-amber-950">Company not found</h2>
+          <p className="mt-2 text-sm text-amber-900">
+            {state?.message || "We couldn't verify that company. Try the full name or ticker symbol."}
+          </p>
+          {state?.suggested_match && (
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <Link
+                href={`/?q=${encodeURIComponent(state.suggested_match.ticker)}`}
+                className="btn-primary px-4 py-2 text-sm"
+              >
+                Use {state.suggested_match.name} ({state.suggested_match.ticker})
+              </Link>
+              <span className="text-xs text-amber-800">Starts a new research run with the suggested company</span>
+            </div>
+          )}
+          <Link href="/" className="mt-4 inline-block text-sm font-medium text-brand hover:underline">
+            ← Try a different company
+          </Link>
+        </section>
+      )}
 
       {awaitingHuman && checkpoint && (
         <CheckpointPanel

@@ -80,11 +80,45 @@ class TestNoMatch:
     @patch("app.agents.company_validation.search_companies")
     def test_private_company_classification_is_surfaced(self, mock_search, mock_classify):
         mock_search.return_value = []
-        mock_classify.return_value = (ValidationStatus.PRIVATE_COMPANY, "privately held")
+        mock_classify.return_value = (ValidationStatus.PRIVATE_COMPANY, "privately held", None)
 
         evidence, status = company_validation.validate_company("SpaceX", "r1", "t1")
         assert status == ValidationStatus.PRIVATE_COMPANY
         assert "privately held" in evidence.content["message"]
+
+
+class TestTypoDetection:
+    @patch("app.agents.company_validation._llm_suggest_company")
+    @patch("app.agents.company_validation._verify_suggestion")
+    @patch("app.agents.company_validation.search_companies")
+    def test_typo_suggests_correction(self, mock_search, mock_verify, mock_llm):
+        """A misspelling like 'micrft' should not auto-confirm the wrong company."""
+        wrong = match(ticker="MICR", name="Micron Solutions Inc", score=50.0)
+        mock_search.return_value = [wrong]
+        mock_llm.return_value = {"ticker": "MSFT", "name": "Microsoft Corporation"}
+        mock_verify.return_value = match(ticker="MSFT", name="Microsoft Corporation", score=100.0)
+
+        evidence, status = company_validation.validate_company("micrft", "r1", "t1")
+
+        assert status == ValidationStatus.NOT_FOUND
+        assert "Did you mean" in evidence.content["message"]
+        assert evidence.content["suggested_match"]["ticker"] == "MSFT"
+        assert "Microsoft" in evidence.content["message"]
+
+    @patch("app.agents.company_validation._classify_no_match")
+    @patch("app.agents.company_validation.search_companies")
+    def test_no_search_results_surfaces_suggestion(self, mock_search, mock_classify):
+        mock_search.return_value = []
+        mock_classify.return_value = (
+            ValidationStatus.NOT_FOUND,
+            'We couldn\'t find a company matching "micrft". Did you mean Microsoft Corporation (MSFT)?',
+            {"ticker": "MSFT", "name": "Microsoft Corporation"},
+        )
+
+        evidence, status = company_validation.validate_company("micrft", "r1", "t1")
+
+        assert status == ValidationStatus.NOT_FOUND
+        assert evidence.content["suggested_match"]["ticker"] == "MSFT"
 
 
 class TestA2AHandler:

@@ -74,6 +74,7 @@ def _public_state(state: dict) -> dict:
         "status": state.get("status"),
         "validation_status": state.get("validation_status"),
         "message": state.get("validation_message"),
+        "suggested_match": state.get("suggested_match"),
         "evidence_count": len(state.get("evidence_ids", [])),
         "recommendation": state.get("recommendation"),
         "evidence_score": state.get("evidence_score"),

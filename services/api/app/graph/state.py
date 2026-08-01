@@ -62,6 +62,7 @@ class ResearchState(TypedDict, total=False):
     # --- validation / HITL #1 -----------------------------------------------
     validation_status: str | None      # contracts.ValidationStatus
     validation_message: str | None     # user-facing explanation
+    suggested_match: dict | None       # typo correction offered to the user
     candidates: list[dict]             # candidate companies awaiting confirmation
     checkpoint_1_confirmed: bool | None
     validation_attempts: int           # bounds the reject -> retry loop
@@ -122,6 +123,7 @@ def initial_state(run_id: str, raw_query: str, trace_id: str | None = None) -> R
         company_name=None,
         validation_status=None,
         validation_message=None,
+        suggested_match=None,
         candidates=[],
         checkpoint_1_confirmed=None,
         validation_attempts=0,

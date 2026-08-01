@@ -80,6 +80,7 @@ async def validate_company_node(state: ResearchState) -> dict:
         return {
             "validation_status": status,
             "validation_message": content.get("message"),
+            "suggested_match": content.get("suggested_match"),
             "validation_attempts": attempts,
             "evidence_ids": [evidence.evidence_id],
             "status": "validation_failed",

@@ -21,6 +21,13 @@ export default function HomePage() {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    const suggested = new URLSearchParams(window.location.search).get("q");
+    if (suggested) {
+      setQuery(suggested);
+    }
+  }, []);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!query.trim()) return;

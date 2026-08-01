@@ -8,6 +8,7 @@ export interface RunState {
   status?: string;
   validation_status?: string;
   message?: string;
+  suggested_match?: { ticker: string; name: string; exchange?: string };
   evidence_count?: number;
   evidence_score?: number;
   recommendation?: Recommendation;

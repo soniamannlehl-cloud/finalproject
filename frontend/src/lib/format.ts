@@ -1,7 +1,14 @@
-/** Strip internal claim/evidence tags from committee prose shown in the UI. */
+/** Strip internal claim/evidence tags and HTML markup from prose shown in the UI. */
 export function cleanCommitteeText(text?: string): string {
   if (!text) return "";
   return text
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
     .replace(/\[(?:claim|ev)_[a-f0-9]+(?:_\w+)?\]/gi, "")
     .replace(/\s{2,}/g, " ")
     .trim();

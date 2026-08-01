@@ -1,495 +1,314 @@
 # Investment Research Platform — Architecture Document
 
-*Research a public company the way an investment firm would—using a team of AI analysts that work together, verify their findings, and keep you involved in the final decision.*
-
-**Author:** Sonia Mann 
+**Author:** Sonia Mannlehl  
 **Course:** UCLA Extension — Agentic AI & Autonomous Systems (Capstone)  
 **Repository:** https://github.com/soniamannlehl-cloud/finalproject
 
-> ⚠️ **Academic capstone project.** This project was built as part of UCLA Extension's Agentic AI & Autonomous Systems course. It is for educational purposes only and is not investment advice.
+> ⚠️ Academic capstone project. Built for educational purposes only. Not investment advice.
 
 ---
 
-## Why I Built It
+# Part I — Architecture Document
 
-Researching a company before investing isn't simple.
+## 1. System Design
 
-Professional investors don't make decisions based on one financial ratio or one news article. They gather information from many different sources, understand the company's industry, evaluate its financial performance, identify risks, compare competitors, and build an investment thesis before making a recommendation.
+The **Investment Research Platform** simulates a professional investment research desk. A user enters a public company ticker; the system plans industry-specific research, assigns work to specialized AI analysts, collects cited evidence, builds a living investment thesis, runs safety checks, convenes a Bull/Bear/CIO investment committee, generates a report, and requires human approval before finalizing any recommendation.
 
-I wanted to see if a team of AI agents could work together the same way a professional investment research team does.
+### Design principles
 
-Instead of asking one AI assistant to do everything, I built a system where specialized AI agents each have a specific job and collaborate to produce a research report supported by evidence.
+| Principle | Implementation |
+|-----------|----------------|
+| **Evidence-first** | Every claim must cite stored evidence IDs (enforced in Pydantic models and PostgreSQL). |
+| **Refuse to guess** | When evidence is insufficient, the platform returns *Insufficient Evidence* — not a forced Buy/Sell. |
+| **Human-in-the-loop** | Two approval checkpoints: confirm the company before research spend; review the full report before finalize. |
 
----
+### Components
 
-## What The Platform Does
+The platform runs as **four deployable services** plus a database. Three Python backends use different agent frameworks; a shared `packages/contracts` library (Pydantic only) defines common schemas.
 
-Enter the name or ticker symbol of a public company. The platform then:
+| Component | Port | Technology | Role |
+|-----------|------|------------|------|
+| Web application | 3000 | Next.js | User dashboard and approval UI |
+| API service (control plane) | 8080 | LangGraph + FastAPI | Workflow, planning, safety, reports |
+| Specialists service (data plane) | 8081 | A2A + FastAPI | 10 research agents, external APIs |
+| Committee service (deliberation) | 8082 | CrewAI + FastAPI | Bull / Bear / CIO debate |
+| PostgreSQL | 5432 | PostgreSQL | Evidence, thesis, checkpoints, reports |
 
-1. **Confirms you selected the correct company** (Checkpoint #1 — before any research spend)
-2. **Creates a research plan** based on the company's industry
-3. **Assigns research tasks** to specialized AI analysts
-4. **Collects information** from financial data, SEC filings, earnings reports, news, and other trusted sources
-5. **Builds an investment thesis** as new evidence is collected
-6. **Holds an AI investment committee discussion** with both bullish and bearish viewpoints
-7. **Generates a complete investment research report**
-8. **Waits for your approval** before finalizing the recommendation (Checkpoint #2)
-
-If there isn't enough evidence, the platform doesn't guess. Instead, it returns **Insufficient Evidence** and tells you that more research is needed.
-
-The sections below describe how this works technically: system design, agent roles, framework choices, data flow, and the design tradeoffs I made along the way.
-
----
-
-## 1. System design
-
-At a high level, the **Investment Research Platform** mirrors a research desk workflow. A user enters a ticker; the platform plans industry-specific research, dispatches specialist agents to gather cited evidence, maintains a versioned investment thesis, runs safety checks, convenes an adversarial investment committee, generates a structured report, and requires human approval before any recommendation is finalized.
-
-### Design commitments
-
-These three principles guided every architectural decision:
-
-1. **Nothing is asserted without evidence** — every claim must cite stored evidence IDs (enforced in code and the database).
-2. **The platform may refuse to opiniate** — when evidence is too weak, the answer is *more research needed*, not a confident guess.
-3. **You hold the final gate** — two human checkpoints; you can approve, reject, or request additional analysis before anything is finalized.
-
-### Runtime topology
-
-Four deployable components communicate over HTTP. Three Python services use
-**different agent frameworks** on purpose; a shared `packages/contracts`
-library (Pydantic only) is the integration seam.
-
-| Component | Port | Technology | Responsibility |
-|-----------|------|------------|----------------|
-| Frontend | 3000 | Next.js | Dashboard, HITL approval UI |
-| API (control plane) | 8080 | LangGraph + FastAPI | Workflow, planning, safety, reports |
-| Specialists (data plane) | 8081 | A2A + FastAPI | 10 research agents, external APIs |
-| Committee (deliberation) | 8082 | CrewAI + FastAPI | Bull / Bear / CIO debate |
-| Postgres | 5432 | PostgreSQL | Evidence, thesis history, checkpoints |
-
-**Core invariant:** the control plane *decides*, the data plane *retrieves*, the
-committee *argues*. The API service never calls Yahoo Finance; specialists
-never choose what to research next.
+**Architectural invariant:** the control plane *decides*, the data plane *retrieves*, the committee *argues*. The API never calls market-data APIs directly; specialists never decide what to research next.
 
 ---
 
-## 2. Architecture diagram
+## 2. Architecture Diagram
 
-### Figure 1 — System architecture (service topology)
+### Diagram 1 — System architecture (required)
 
-This diagram shows **how the deployable services connect**. The frontend talks
-only to the API. The API orchestrates everything, calls specialists and
-committee over HTTP, and is the **only** service that reads/writes Postgres.
+Shows how services connect at deployment time. The web app talks **only** to the API. The API is the **only** component that reads/writes PostgreSQL.
 
 ```mermaid
 flowchart TB
     User([User])
 
-    UI["Frontend :3000<br/>(Next.js dashboard)"]
+    FE["Web App :3000<br/>(Next.js)"]
 
-    subgraph API["API Service :8080 — Control Plane<br/>(LangGraph + FastAPI)"]
-        direction TB
-        WF["Workflow orchestrator<br/>validate → plan → dispatch → thesis →<br/>safety → synthesize → report → HITL"]
+    subgraph API["API Service :8080<br/>LangGraph + FastAPI"]
+        ORCH["Orchestrator<br/>(workflow, HITL, planning,<br/>thesis, safety, report)"]
     end
 
-    subgraph SPEC["Specialists Service :8081 — Data Plane<br/>(A2A server)"]
-        AG["10 research agents"]
-        TOOLS["External sources<br/>yfinance · SEC · FMP · News · Polygon"]
+    subgraph SPEC["Specialists :8081<br/>A2A research agents"]
+        AGENTS["10 specialist agents"]
+        EXT["External data<br/>yfinance · SEC · FMP · News · Polygon"]
     end
 
-    subgraph COM["Committee Service :8082 — Deliberation<br/>(CrewAI)"]
-        BBC["Bull → Bear → CIO<br/>(debates evidence brief only)"]
+    subgraph COM["Committee :8082<br/>CrewAI"]
+        COMIT["Bull → Bear → CIO"]
     end
 
-    DB[("PostgreSQL :5432<br/>evidence · claims · thesis ·<br/>checkpoints · reports")]
+    DB[("PostgreSQL<br/>evidence · thesis · checkpoints")]
 
-    User --> UI
-    UI <-->|REST| API
-
-    API -->|"A2A / HTTP<br/>(dispatch tasks, receive evidence)"| AG
-    AG --> TOOLS
-
-    API -->|"HTTP<br/>(send evidence brief, receive proposal)"| COM
-
-    API <-->|"SQL<br/>(persist & load all run data)"| DB
+    User --> FE
+    FE <-->|REST| ORCH
+    ORCH -->|"A2A / HTTP"| AGENTS
+    AGENTS --> EXT
+    ORCH -->|"HTTP (evidence brief)"| COMIT
+    ORCH <-->|SQL| DB
 ```
 
-**What this diagram intentionally omits:** internal LangGraph node names and
-the research loop (director dispatches parallel tasks layer-by-layer until the
-plan is complete). That detail is in Figure 2 (sequence) and Figure 4 (graph).
+### Diagram 2 — Research workflow (LangGraph)
 
-**Common misreadings to avoid:**
+Shows the **order of stages** inside the API orchestrator. Research tasks run in a loop until the plan is complete; then safety, committee, and report run once.
 
-| Incorrect | Actual behavior |
-|-----------|-----------------|
-| Frontend calls specialists or committee directly | Frontend calls **API only** |
-| Specialists write to Postgres | Specialists return evidence over A2A; **API persists** to Postgres |
-| Safety pipeline calls the committee | **Committee node** in the API runs after safety completes |
-| Synthesizer / report live in the committee service | Both run **inside the API** after the committee returns its proposal |
+```mermaid
+flowchart TD
+    START([Start]) --> VAL[Validate company]
+    VAL --> H1{Checkpoint #1<br/>Confirm company?}
+    H1 -->|No| END1([Stop])
+    H1 -->|Yes| PLAN[Create research plan]
+    PLAN --> DIR[Director: dispatch tasks]
 
-### Figure 2 — End-to-end data flow
+    DIR --> SPEC[Specialist agents<br/>parallel via A2A]
+    SPEC --> COLL[Collect results]
+    COLL --> TH[Update investment thesis]
+    TH --> MORE{More tasks<br/>in plan?}
+    MORE -->|Yes| DIR
+    MORE -->|No| SAFE[Safety checks]
+
+    SAFE --> COMM[Investment committee<br/>Bull / Bear / CIO]
+    COMM --> SYN[Policy gate]
+    SYN --> RPT[Generate report]
+    RPT --> H2{Checkpoint #2<br/>Approve?}
+    H2 -->|Approve / Reject| DONE([End])
+    H2 -->|Request more research| PLAN
+```
+
+---
+
+## 3. Agent Roles
+
+The platform implements **15+ agent roles** across three layers.
+
+### Orchestration agents (API service)
+
+| Agent | Responsibility |
+|-------|----------------|
+| Company Validation | Resolve ticker; detect private or unknown companies |
+| Research Planner | Select industry profile; build research plan (task DAG) |
+| Research Director | Discover agents via A2A; dispatch, retry, merge results |
+| Thesis Agent | Maintain versioned investment thesis as evidence arrives |
+| Safety Pipeline | Check coverage, citations, freshness, contradictions |
+| Synthesizer | Apply deterministic policy rules to committee output |
+| Report Generator | Produce HTML/PDF report with resolved citations |
+
+### Research specialist agents (10 agents, 11 capabilities)
+
+| Agent | Research area |
+|-------|---------------|
+| Company Validation | Ticker resolution |
+| Company Profile | Sector, industry, business description |
+| Financial Analyst | Financial statements and ratios (metrics computed in Python) |
+| Valuation Analyst | Peer-relative valuation |
+| Risk Analyst | Industry-aware risk flags |
+| Investment Driver | KPI and driver assessment |
+| Competitor Analyst | Peer comparison |
+| News Analyst | News sentiment |
+| SEC Filings | EDGAR filings |
+| Earnings Analyst | Earnings beat/miss history |
+
+Specialists do not call each other. Task dependencies (e.g., valuation after financials) are declared in the research plan and enforced by the Director.
+
+### Investment committee (CrewAI)
+
+| Agent | Role |
+|-------|------|
+| Bull Analyst | Strongest case *for* investing |
+| Bear Analyst | Strongest case *against* investing |
+| CIO | Final proposal: buy / hold / sell / insufficient evidence |
+
+The committee debates only from a **condensed evidence brief** — it cannot fetch new data.
+
+---
+
+## 4. Framework Justification
+
+The capstone requires at least **two** course frameworks. This project uses **three**.
+
+| Framework | Location | Why I chose it |
+|-----------|----------|----------------|
+| **LangGraph + HITL** | `services/api/` | The workflow has two human checkpoints that must pause and resume across separate HTTP requests. LangGraph `interrupt()` with Postgres checkpointing supports this; CrewAI cannot pause mid-debate and resume days later. |
+| **A2A Protocol** | `services/specialists/` | Research agents are separately deployed services that advertise capabilities via AgentCards. The Director discovers and routes at runtime — multi-agent communication is a real network protocol, not in-process function calls. |
+| **CrewAI** | `services/committee/` | Bull/Bear/CIO adversarial role-play is CrewAI's strength. The committee is bounded and stateless — no checkpointing or HITL needed inside it. |
+
+**Google ADK — evaluated, not used.** Specialist agents are retrieval-and-compute workloads (fetch data → compute metrics in Python → one LLM interpretation). A full agent runtime would duplicate orchestration the API already owns. Specialists sit behind A2A, so the runtime could be swapped later without changing the workflow.
+
+**Why three services instead of one monolith:** (1) genuine A2A semantics across containers, (2) smaller control-plane Docker image (~530 MB vs ~1.8 GB for committee), (3) blast-radius isolation — a committee failure does not crash in-flight workflows.
+
+---
+
+## 5. Data Flow
+
+### End-to-end path
+
+1. **User → Web app → API** — start run, confirm checkpoints, approve or reject.
+2. **Planner** — selects an industry profile (13 frameworks) and emits a validated `ResearchPlan` (task DAG).
+3. **Director** — for each plan layer, dispatches parallel A2A tasks to specialist agents by **capability** (not agent name).
+4. **Specialists** — call external APIs, compute metrics deterministically, return evidence and claims in the A2A response.
+5. **API persists** — evidence and claims are saved to PostgreSQL; LangGraph state stores only IDs.
+6. **Thesis agent** — updates after each research batch (living thesis, not a one-time summary).
+7. **Safety pipeline** — deterministic checks first, then semantic contradiction/hallucination checks.
+8. **Committee** — API sends a condensed brief; committee returns a proposal over HTTP.
+9. **Synthesizer** — deterministic policy gate may downgrade or block the recommendation.
+10. **Report generator** — builds the report; **Checkpoint #2** presents it to the user.
+
+### Sequence view
 
 ```mermaid
 sequenceDiagram
     actor U as User
-    participant F as Frontend
-    participant A as API (LangGraph)
-    participant S as Specialists (A2A)
-    participant C as Committee (CrewAI)
-    participant P as Postgres
+    participant W as Web App
+    participant A as API
+    participant S as Specialists
+    participant C as Committee
+    participant D as PostgreSQL
 
-    U->>F: Enter ticker
-    F->>A: POST /runs
-    A->>A: validate company
-    A-->>F: HITL #1 — confirm company
-    U->>F: Confirm
-    F->>A: resume(confirm)
-    A->>A: Planner → ResearchPlan DAG
-    loop Each execution layer
-        A->>S: A2ATaskRequest (capability)
-        S->>P: Store Evidence + Claims
-        S-->>A: A2ATaskResult
+    U->>W: Enter ticker
+    W->>A: Start run
+    A-->>W: Checkpoint #1
+    U->>W: Confirm company
+    W->>A: Resume
+
+    loop Until research plan complete
+        A->>S: A2A task (by capability)
+        S-->>A: Evidence + claims
+        A->>D: Save evidence & claims
         A->>A: Update thesis
     end
-    A->>A: Safety pipeline
-    A->>C: Evidence brief (condensed)
-    C-->>A: Bull / Bear / CIO proposal
-    A->>A: Policy synthesizer (deterministic gate)
-    A->>A: Generate report
-    A-->>F: HITL #2 — review report
-    U->>F: Approve / Reject / Replan
-    F->>A: resume(decision)
-    A->>P: Finalize run
+
+    A->>A: Safety checks
+    A->>C: Evidence brief
+    C-->>A: Committee proposal
+    A->>A: Policy gate + generate report
+    A-->>W: Checkpoint #2 (report)
+    U->>W: Approve / reject / replan
+    W->>A: Resume
+    A->>D: Finalize
 ```
-
-### Figure 3 — Research workflow (ASCII)
-
-This matches the flow described in the README — from ticker entry to your final review:
-
-```
-You enter a company or ticker
-          │
-          ▼
-Confirm the correct company          ◆ Checkpoint #1
-          │
-          ▼
-Create a research plan (industry-specific)
-          │
-          ▼
-Specialized AI analysts research the company  (parallel)
-          │
-          ▼
-Evidence is collected → Investment thesis is built
-          │
-          ▼
-Safety checks → AI Investment Committee (Bull / Bear / CIO)
-          │
-          ▼
-Research report generated
-          │
-          ▼
-You review the final recommendation  ◆ Checkpoint #2
-          │
-          ▼
-Approved investment research report
-```
-
-### Figure 4 — LangGraph workflow (technical detail)
-
-```
-START → validate → ◆ HITL #1 → planner → director
-              ↓                      ↑
-         specialist_proxy × N  (parallel A2A via Send API)
-              ↓
-           collect → thesis → (loop until plan complete)
-              ↓
-         safety → committee → synthesizer → report → ◆ HITL #2
-              │                                         │
-              │              approve/reject ────────────┴→ END
-              └──── replan (capped) ───────────────────→ planner
-```
-
-The graph topology is **static**; dynamic behavior comes from the
-`ResearchPlan` in state and LangGraph's `Send` API for parallel dispatch.
-This preserves checkpoint compatibility across HITL pauses.
-
----
-
-## 3. Agent roles
-
-The platform uses **15+ distinct agent roles** across three layers — a team of specialists, not one general-purpose assistant.
-
-### Control plane (API service)
-
-| Agent / Node | Role | Does not |
-|--------------|------|----------|
-| **Company Validation** | Resolve ticker; classify public / private / unknown | Fetch financials |
-| **Research Planner** | Select industry profile; emit `ResearchPlan` task DAG | Execute research |
-| **Research Director** | Discover agents via A2A; dispatch, retry, merge results | Perform analysis |
-| **Thesis Agent** | Versioned living thesis + structured analyst framework | Invent facts |
-| **Safety Pipeline** | Coverage, citations, freshness, contradiction checks | Rewrite content |
-| **Synthesizer** | Apply deterministic policy gate to committee output | Override rules with LLM |
-| **Report Generator** | HTML/PDF report with resolved citations | Add uncited claims |
-
-### Data plane — 10 specialist agents (11 capabilities)
-
-| Agent | Capability(ies) | Output |
-|-------|-----------------|--------|
-| Company Validation | `company.validate` | Resolved ticker or structured failure |
-| Company Profile | `company.profile` | Sector, industry, business summary |
-| Financial Analyst | `financials.statements`, `financials.ratios` | Statements + **Python-computed** metrics |
-| Valuation Analyst | `valuation.estimate` | Peer-relative valuation range |
-| Risk Analyst | `risk.analysis` | Threshold-based risks from profile rules |
-| Investment Driver | `investment.drivers` | KPI assessment vs profile drivers |
-| Competitor Analyst | `competitors.analysis` | Percentile rank vs peers |
-| News Analyst | `news.sentiment` | Sentiment tone + coverage count |
-| SEC Filings | `filings.sec` | Material EDGAR filings |
-| Earnings Analyst | `earnings.call` | Beat/miss history |
-
-Specialists **never call each other**. Dependencies (e.g., valuation depends
-on financials) are declared in the plan and enforced by the Director.
-
-### Deliberation plane — investment committee (CrewAI)
-
-| Agent | Role |
-|-------|------|
-| **Bull Analyst** | Strongest evidence-based case *for* investing |
-| **Bear Analyst** | Strongest evidence-based case *against* investing |
-| **CIO** | Weighs both sides; proposes buy / hold / sell / insufficient_evidence |
-
-The committee receives a **capped evidence brief** only — it cannot fetch new
-data or cite facts outside the brief.
-
----
-
-## 4. Framework justification
-
-The capstone requires at least **two** course frameworks. This project uses **three**.
-
-| Course framework | Where | Why this framework |
-|------------------|-------|-------------------|
-| **LangGraph + HITL** | `services/api/` | Workflow has two human checkpoints that must survive days-long pauses. `interrupt()` + Postgres checkpointing is the right primitive; a CrewAI crew cannot pause mid-debate and resume after a user clicks "Confirm." |
-| **A2A Protocol** | `services/specialists/` | Specialists are separately deployed services advertising capabilities via AgentCards. The Director discovers and routes at runtime — not hardcoded imports. This makes multi-agent communication a real network protocol. |
-| **CrewAI** | `services/committee/` | Bull/Bear/CIO adversarial role-play is CrewAI's strength. The committee is bounded, stateless, and has no HITL — none of LangGraph's advantages apply inside it. |
-
-### Google ADK — evaluated and rejected
-
-ADK was considered for specialist agents. Specialists are **retrieval-and-compute
-workloads**, not open-ended reasoners:
-
-```
-fetch → normalize → compute metrics (Python) → attach citations → one LLM interpretation
-```
-
-Financial ratios are computed deterministically because LLM arithmetic is unreliable.
-Wrapping this in a full agent runtime would add a fourth dependency tree and duplicate
-orchestration the control plane already owns. Specialists sit behind A2A, so a future
-ADK swap would only change what runs behind an endpoint.
-
-### Why three services (not one monolith)
-
-A dependency-isolation experiment showed LangGraph and CrewAI *can* install together,
-but the split is still justified by:
-
-1. **Genuine A2A semantics** — separate addressable agents, not decorated function calls.
-2. **Image size** — API ~530 MB vs committee ~1.8 GB; merging would slow every rebuild.
-3. **Blast radius** — a CrewAI failure cannot kill in-flight checkpointed workflows.
-
----
-
-## 5. Data flow
-
-### Planning artifact
-
-The Planner emits a `ResearchPlan`: a validated DAG of `TaskSpec` objects. Each
-task names a **capability** (not an agent ID). Industry profiles (`packages/contracts/industry_profiles/`)
-configure which capabilities, metrics, and valuation methods apply — e.g., banks
-get ROE/NIM; REITs get FFO/NAV.
-
-### Evidence and state
-
-| Stored in LangGraph state (checkpointed) | Stored in Postgres (referenced by ID) |
-|------------------------------------------|---------------------------------------|
-| ticker, plan, task_status, scores | evidence payloads, claims |
-| evidence_ids (list) | thesis version history |
-| HITL decisions | reports, tool-call log |
-
-Large payloads (filings, metrics) stay in Postgres so checkpoints remain small
-and HITL resume stays fast.
 
 ### External data sources (6+)
 
-| Source | Data | Fallback |
-|--------|------|----------|
-| Yahoo Finance (yfinance) | Quotes, statements | — (keyless anchor) |
-| FMP | Financial statements | yfinance |
-| SEC EDGAR | Filings | FMP |
-| NewsAPI | Company news | Tavily |
-| Tavily | Web search | — |
-| Polygon / Massive | Market quotes | yfinance |
-
-Missing providers degrade gracefully: evidence confidence drops, gaps are **declared in the report**.
-
-### Guardrails (summary)
-
-```
-L0 Schema       — Claim requires ≥1 evidence_id (Pydantic + SQL)
-L1 Deterministic — freshness, citation resolution, coverage scoring
-L2 Semantic     — contradiction / hallucination detection (LLM)
-L3 Policy       — recommendation gating (deterministic; overrides committee)
-L4 Human        — HITL #2
-```
-
-The committee **proposes**; the synthesizer and policy gate **dispose**.
+Yahoo Finance (keyless fallback), FMP, SEC EDGAR, NewsAPI, Tavily, Polygon/Massive. Missing providers degrade gracefully — gaps appear in the report, not hidden failures.
 
 ---
 
-## 6. Key design decisions
+## 6. Key Design Decisions
 
-| Decision | Rationale | Tradeoff |
-|----------|-----------|----------|
-| Static graph + dynamic `Send` dispatch | Checkpoint-stable topology; parallel specialist fan-out | Planner does not literally rebuild the graph |
-| Capability-based routing | Planner decoupled from agent identity | New specialist = register AgentCard, not graph edit |
-| Deterministic financial math | Eliminates arithmetic hallucination | Less "agentic" than LLM-computed ratios |
-| Condensed committee brief | Cost control + prevents off-brief citations | Committee cannot use evidence not in brief |
-| Capped retries / replans | Prevents runaway loops in demo and production | May stop before full convergence |
-| `packages/contracts` shared package | Framework-neutral schemas across 3 services | Extra package to maintain |
-| Model tiering (mini vs gpt-4o) | Cost control on high-volume calls | Two tiers to tune |
-
----
-
-# Technical Analysis
-
-This section connects my implementation to course concepts in multi-agent systems: which planning paradigm I used and why, how my coordination model compares to alternatives, and what the platform's limitations are.
+| Decision | Why | Tradeoff |
+|----------|-----|----------|
+| Static workflow graph + dynamic task dispatch | Checkpoint-stable; parallel research via LangGraph `Send` | Graph topology does not change per company |
+| Capability-based agent routing | Planner independent of agent implementation | Must register new agents in A2A catalog |
+| Python-computed financial metrics | Prevents LLM arithmetic errors | Less flexible than LLM-computed numbers |
+| Capped evidence brief for committee | Controls cost; committee cannot cite off-brief facts | Committee sees a summary, not raw filings |
+| API-only database access | Single persistence layer; specialists stay stateless | All evidence flows through the control plane |
+| Deterministic policy gate after committee | LLM cannot override insufficient evidence | May block a confident-sounding committee call |
+| Bounded retries and replans | Prevents runaway loops and cost spikes | May stop before fully converging |
 
 ---
 
-## 7. Planning paradigm: hierarchical decomposition with monitored replanning
+# Part II — Technical Analysis
 
-### What I chose
-
-The platform combines **three planning styles**, each matched to the uncertainty of the task:
-
-**1. Fixed workflows for specialists (not ReAct loops)**  
-Each specialist follows a predefined code path: call provider → normalize →
-compute → optionally interpret. ReAct-style tool selection was rejected because
-the data sources and steps are known in advance. Letting an LLM dynamically
-choose tools adds non-determinism without benefit — a dynamic agent can skip
-SEC filings or stop early. This follows the course distinction between
-**workflows** (known structure) and **agents** (open-ended autonomy).
-
-**2. Explicit hierarchical decomposition at the Planner**  
-The Planner performs top-down task decomposition, emitting a `ResearchPlan`
-whose structure varies by **industry profile**. Decomposition is a **data artifact**
-(loggable, diffable, testable, visible in the UI) — not an implicit chain of
-prompts. This is explicit planning: the plan is inspectable before execution starts.
-
-**3. Monitor-and-revise replanning at HITL #2**  
-When the human requests more analysis, the Planner emits a new plan *revision*
-(with `parent_revision` and `replan_reason`). The Director diffs against completed
-work and dispatches only the **delta**. This is monitored replanning: the system
-does not patch outputs in place; it revises the plan and re-executes affected tasks.
-
-### Why not pure ReAct or pure pipeline?
-
-| Approach | Why not used here |
-|----------|-------------------|
-| **Pure ReAct** (single agent, dynamic tools) | No industry-aware structure; hard to enforce evidence citations; unpredictable cost |
-| **Pure fixed pipeline** (same steps every ticker) | Banks and REITs need different metrics and valuation methods |
-| **LLM-only planning** (no validated DAG) | Cycles and orphan dependencies cause mid-run hangs; we validate the DAG at construction |
-
-Our hybrid — **explicit plan artifact + fixed specialist workflows + capped replan** —
-balances adaptability with auditability. That matters for a platform that must
-explain *why* it researched what it researched.
+*Critical reflection connecting this implementation to course concepts in multi-agent systems.*
 
 ---
 
-## 8. Coordination model: orchestrator–worker with capability routing
+## 7. Planning Paradigm
 
-### What I chose
+### What I used: hierarchical decomposition with monitored replanning
 
-The dominant pattern is **hub-and-spoke orchestration**: a LangGraph state machine coordinates all stages. The Director dispatches work to specialist analysts via A2A; the committee handles deliberation as a separate step.
+I matched planning style to how much uncertainty exists at each layer:
+
+**Specialists — fixed workflows (not ReAct).** Each analyst follows a known path: fetch → normalize → compute → interpret. ReAct-style dynamic tool selection was rejected because research steps are known in advance. A dynamic agent can skip filings or stop early; a workflow cannot.
+
+**Planner — explicit hierarchical decomposition.** The Planner emits a `ResearchPlan` — a validated task DAG whose tasks, metrics, and valuation methods vary by **industry profile** (banks vs REITs vs tech). The plan is a data artifact: visible in the UI, testable, and diffable when replanning occurs. This is explicit planning, not a hardcoded pipeline or an implicit prompt chain.
+
+**HITL #2 — monitor-and-revise replanning.** When the user requests more analysis, the Planner creates a new plan revision. The Director dispatches only tasks that were not already completed. The thesis is rebuilt from new evidence rather than patched in place.
+
+### Why not alternatives?
+
+| Paradigm | Why not used |
+|----------|--------------|
+| Pure ReAct (one agent, dynamic tools) | No industry-specific structure; hard to enforce citations; unpredictable cost |
+| Pure fixed pipeline (same steps every company) | A bank and a REIT require different metrics and valuation methods |
+| LLM-only planning (no DAG validation) | Invalid dependencies cause mid-run hangs; DAG is validated at construction |
+
+---
+
+## 8. Coordination Model
+
+### What I used: orchestrator–worker with capability routing
+
+A **LangGraph state machine** (hub) coordinates all stages. The Director assigns tasks to specialist workers via A2A. The committee is a separate worker invoked once research and safety are complete.
 
 ```mermaid
 flowchart LR
-    ORCH[LangGraph Orchestrator]
-    ORCH --> W1[Specialist: Financials]
-    ORCH --> W2[Specialist: Valuation]
-    ORCH --> W3[Specialist: Risk]
-    ORCH --> W4[Committee: Bull/Bear/CIO]
-    W1 & W2 & W3 --> ORCH
-    W4 --> ORCH
+    HUB[LangGraph<br/>Orchestrator]
+    HUB --> F[Financials]
+    HUB --> V[Valuation]
+    HUB --> R[Risk]
+    HUB --> C[Committee]
+    F & V & R & C --> HUB
 ```
 
-### Comparison to alternatives
+### Comparison to course alternatives
 
-| Coordination model | Description | Fit for this project |
-|--------------------|-------------|----------------------|
-| **Orchestrator–worker** (chosen) | Central controller assigns tasks with known dependencies | ✅ Dependencies are known (valuation needs financials); graph is debuggable; every transition is enumerable in `builder.py` |
-| **Autonomous conversation** (AutoGen group chat, CrewAI delegation) | Agents negotiate turn order and delegate freely | ❌ Research dependencies are fixed, not emergent; conversation hides structure; hard to retry one failed step |
-| **Blackboard** | Agents read/write shared memory opportunistically | ⚠️ Partial — Postgres evidence store resembles a blackboard, but routing is **not** opportunistic; the Director assigns work explicitly |
-| **Market-based / auction** | Agents bid on tasks | ❌ Over-engineered for 10 known specialists with fixed capabilities |
+| Model | Description | Assessment |
+|-------|-------------|------------|
+| **Orchestrator–worker** *(chosen)* | Central controller assigns tasks with known dependencies | Best fit — valuation depends on financials; every transition is explicit in `graph/builder.py` |
+| **Autonomous conversation** (AutoGen, CrewAI delegation) | Agents negotiate order and delegate freely | Rejected — dependencies are fixed; conversation hides structure; hard to retry one failed task |
+| **Blackboard** | Agents read/write shared memory opportunistically | Partial — Postgres stores evidence, but the Director assigns work explicitly; routing is not opportunistic |
+| **Peer / market-based** | Agents bid for tasks | Rejected — over-engineered for 10 known specialists |
 
-**Where A2A adds peer-style coordination:** the Director routes by **capability
-match** at runtime (discovered from AgentCards), not by hardcoded agent IDs.
-This is the one place routing resembles capability-based peer dispatch rather
-than fixed graph edges — and it is why A2A earns a separate service boundary.
+**A2A's role:** the Director routes by **capability match** at runtime (from AgentCards), not hardcoded agent IDs. That is capability-based dispatch within an orchestrator–worker pattern.
 
-**Where CrewAI differs:** inside the committee, Bull → Bear → CIO is sequential
-role-play with context handoff — a small conversational subgraph, deliberately
-bounded (no delegation, no memory, `max_iter=2`).
+**CrewAI's role:** limited to the committee subgraph — sequential Bull → Bear → CIO debate with no delegation and no cross-run memory.
 
-### Tool-use pattern
-
-Numeric results (ratios, scores, thresholds) are computed in **Python**.
-The LLM interprets pre-computed values; it does not calculate them. Alternatives
-rejected:
-
-- **LLM arithmetic** — unreliable (negative-EPS P/E, rounding errors).
-- **Code interpreter agent** — flexible but harder to audit for a fixed formula set.
-
-This is a deliberate **workflow-over-agent** choice at the data layer.
+**Tool-use pattern:** numbers are computed in Python; the LLM interprets results. LLM arithmetic and code-interpreter patterns were rejected as unreliable or hard to audit for financial ratios.
 
 ---
 
 ## 9. Limitations
 
-| Limitation | Impact |
-|------------|--------|
-| **Bounded industry profiles** | Companies outside 13 profiles fall back to generic analysis — less precise metrics |
-| **No cross-session learning** | Each run is independent; the platform does not improve from past approvals |
-| **Startup-cached A2A discovery** | A specialist deployed mid-run is not discovered until refresh |
-| **Semantic safety is LLM-judged** | Contradiction/hallucination checks inherit model failure modes; deterministic layers are the real floor |
-| **Committee cost** | Three LLM agents dominate per-run token spend despite brief capping |
-| **Local-only deployment** | Runs on Docker locally; no hosted demo URL without additional deployment work |
-| **No per-run budget cap** | Retries and replans are capped, but token/$ spend per run is not hard-limited |
-| **Single-instance architecture** | No queue-backed dispatch; specialist restart mid-run fails tasks into retry path |
+| Limitation | Consequence |
+|------------|-------------|
+| Bounded industry profiles (13) | Unmatched companies get generic analysis |
+| No cross-session learning | Each run is independent |
+| Semantic safety is LLM-judged | Contradiction detection inherits model weaknesses; deterministic checks are the floor |
+| Committee is the main cost driver | Three LLM agents per run despite brief capping |
+| Local Docker deployment | Reviewers must run locally or watch a screen recording |
+| No per-run token budget | Retries/replans are capped, but total spend is not |
+| Single-instance services | No queue-backed dispatch; mid-run specialist restart relies on retry logic |
 
-### What I would do next
+### Future work
 
-- Publish `packages/contracts` as a standalone open-source package others can reuse.
-- Add queue-backed agent dispatch for resilience at scale.
-- Expand industry profile coverage and per-run cost controls.
-- Deploy a hosted demo environment so reviewers can access the UI without running Docker locally.
+Expand industry profiles, add per-run cost controls, publish the shared contracts package as a standalone library, and deploy a hosted demo URL for reviewers.
 
 ---
 
-## 10. Course frameworks summary
-
-This capstone required at least **two** of five course frameworks. I used **three**:
-
-| Framework | Used? | Where in the codebase |
-|-----------|-------|------------------------|
-| LangGraph + HITL | ✅ Yes | 2 human checkpoints, Postgres checkpointing — `services/api/app/graph/` |
-| A2A Protocol | ✅ Yes | AgentCards, capability routing — `services/specialists/app/a2a/` |
-| CrewAI | ✅ Yes | Bull / Bear / CIO debate — `services/committee/app/crew/` |
-| Google ADK | ❌ No | Evaluated; rejected — see §4 |
-| n8n | ❌ No | Not needed — three frameworks already satisfy the requirement |
-
-**Scope delivered:** 15+ agent roles · explicit research plan · 6+ data sources ·
-2 human approval checkpoints · layered guardrails · Docker Compose deployment ·
-automated evaluation harness (`evaluation/run_consistency.py`).
-
----
-
-*Document version: capstone submission · diagrams render in GitHub Markdown and export cleanly to PDF via any Markdown-to-PDF tool (no images required).*
+*Export tip: open this file on GitHub or in any Markdown editor → Print → Save as PDF. Diagrams are Mermaid (no image files required).*

@@ -1,127 +1,121 @@
-#Investment Research Platform
+## Investment Research Platform
 
-**An AI-powered investment research platform that simulates the workflow of a professional equity research firm. Instead of relying on a single AI assistant, a team of specialized AI analysts collaborates to research a publicly traded company, evaluate evidence, debate investment opportunities, and produce a transparent investment report that keeps humans in control of the final decision.**
+*Research a public company the way an investment firm would—using a team of AI analysts that work together, verify their findings, and keep you involved in the final decision.**
 
-> ⚠️ **Academic capstone project.** This is not investment advice.
-
----
-
-## The Problem
-
-Investment research is slow, expensive, and easy to get wrong. A single analyst must pull financials, compare peers, read filings, track news, assess risks, and form a view — often under time pressure. When AI is added to this workflow, new problems appear: models **invent numbers**, **skip verification**, and **always sound confident** even when evidence is thin.
-
-The challenge is not “make an LLM summarize a 10-K.” It is: **how do you design an autonomous system that plans its work, gathers traceable evidence, checks its own conclusions, and knows when to stop?**
+> ⚠️ **Academic capstone project.** This project was built as part of UCLA Extension's Agentic AI & Autonomous Systems course. It is for educational purposes only and is not investment advice.
 
 ---
 
-## The Solution
+## Why I Built It
 
-This project models a **research desk**, not a chatbot. You enter a ticker; the system:
+Researching a company before investing isn't simple.
 
-1. **Confirms the company** with you before spending time or API cost
-2. **Plans** an industry-specific research strategy (a bank is not analyzed like a REIT)
-3. **Dispatches specialist agents** in parallel to gather real data from market and regulatory sources
-4. **Builds a living investment thesis** that updates as evidence arrives
-5. **Runs safety checks** on coverage, citations, and contradictions
-6. **Convenes an investment committee** — Bull, Bear, and CIO — that debates only from verified evidence
-7. **Generates a structured report** and waits for your **final approval** before anything is finalized
+Professional investors don't make decisions based on one financial ratio or one news article. They gather information from many different sources, understand the company's industry, evaluate its financial performance, identify risks, compare competitors, and build an investment thesis before making a recommendation.
 
-If evidence is too weak, the system returns **Insufficient Evidence** instead of a reckless Buy/Sell call.
+I wanted to see if a team of AI agents could work together the same way a professional investment research team does.
+
+Instead of asking one AI assistant to do everything, I built a system where specialized AI agents each have a specific job and collaborate to produce a research report supported by evidence.
+
+---
+
+## What The Platform Does
+
+Enter the name or ticker symbol of a public company.
+
+The platform then:
+
+Confirms you selected the correct company
+Creates a research plan based on the company's industry
+Assigns research tasks to specialized AI analysts
+Collects information from financial data, SEC filings, earnings reports, news, and other trusted sources
+Builds an investment thesis as new evidence is collected
+Holds an AI investment committee discussion with both bullish and bearish viewpoints
+Generates a complete investment research report
+Waits for your approval before finalizing the recommendation
+
+If there isn't enough evidence, the platform doesn't guess. Instead, it tells you that more research is needed.
 
 ---
 
 ## How It Works
 
 ```
-You enter a ticker
-       │
-       ▼
-Checkpoint #1 ──▶ Confirm company
-       │
-       ▼
-Planner selects industry profile ──▶ Research plan (task DAG)
-       │
-       ▼
-Director dispatches specialists in parallel ──▶ Evidence stored in Postgres
-       │
-       ▼
-Thesis updates ──▶ Safety review ──▶ Committee debate (Bull / Bear / CIO)
-       │
-       ▼
-Policy gate applies rules ──▶ Report generated
-       │
-       ▼
-Checkpoint #2 ──▶ You approve, reject, or request more research
+You Enter a Company or ticker
+          │
+          ▼
+Confirm the Correct Company
+          │
+          ▼
+Create a Research Plan
+          │
+          ▼
+Specialized AI Analysts Research the Company
+          │
+          ▼
+Evidence is Collected
+          │
+          ▼
+Investment Thesis is Built
+          │
+          ▼
+AI Investment Committee Reviews the Evidence
+          │
+          ▼
+You Review the Final Recommendation
+          │
+          ▼
+Investment Research Report
 ```
-
-**Design principle:** the control plane *decides*, the data plane *retrieves*, the committee *argues*. No single agent does everything, and no recommendation ships without a human in the loop.
 
 ---
 
 ## Key Features
 
-| Feature | Why it matters |
-|---------|----------------|
-| **Web dashboard** | Start research, watch progress, and approve checkpoints in a browser |
-| **Industry-aware planning** | 13 industry profiles tailor metrics, valuation methods, and risk rules |
-| **10 specialist agents** | Financials, valuation, risk, peers, news, SEC filings, earnings, and more |
-| **Living investment thesis** | Versioned stance with a structured analyst framework (drivers, risks, catalysts) |
-| **Safety pipeline** | Coverage checks, citation integrity, stale-data flags, contradiction detection |
-| **Adversarial committee** | Bull and Bear must argue opposing cases before the CIO decides |
-| **Deterministic policy gate** | Rules — not the LLM — have the final say on Buy / Hold / Sell |
-| **Two human checkpoints** | Confirm before research; review the full report before finalize |
-| **Graceful degradation** | Runs without paid data APIs; gaps are disclosed, not hidden |
+| **Feature**                    | **What it Does**                                                                                                            | **Why it Matters**                                                                                    |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Industry-Specific Research** | Creates a research plan based on the company's industry and business model.                                                 | A technology company shouldn't be analyzed the same way as a bank, REIT, or healthcare company.       |
+| **Team of AI Analysts**        | Assigns specialized AI agents to research financials, valuation, competitors, news, risks, SEC filings, earnings, and more. | Each agent focuses on one area, creating a more complete research process than a single AI assistant. |
+| **Research Planning**          | Builds a step-by-step research plan before any analysis begins.                                                             | Ensures the right questions are answered and the research follows a structured process.               |
+| **Living Investment Thesis**   | Continuously updates the investment thesis as new evidence is collected.                                                    | The recommendation evolves with the research instead of being generated all at once.                  |
+| **AI Investment Committee**    | Bull, Bear, and Chief Investment Officer (CIO) agents debate the investment case.                                           | Helps evaluate both positive and negative perspectives before reaching a recommendation.              |
+| **Human Approval**             | Requires you to confirm the company before research begins and approve the final recommendation.                            | Keeps people involved in important decisions instead of letting AI work completely on its own.        |
+| **Evidence-Based Research**    | Every conclusion must be supported by evidence collected during the research process.                                       | Makes it easier to understand how the recommendation was reached and reduces unsupported claims.      |
+| **Built-in Guardrails**        | Checks for missing evidence, conflicting information, stale data, and unsupported conclusions.                              | Improves the reliability and transparency of the final report.                                        |
+
 
 ---
 
 ## System Architecture
 
-The system is split into **three independent Python services** plus a web frontend. Each service uses the framework best suited to its role, connected over HTTP with a shared contract layer.
+The platform is organized into independent components, each responsible for a specific part of the investment research process.
 
-```
-  Next.js frontend (:3000)
-        │
-        ▼
-  ┌───────────────┐   A2A/HTTP   ┌──────────────────┐
-  │ API service   │─────────────▶│ Specialists      │──▶ Yahoo Finance · SEC
-  │ (LangGraph)   │              │ (research agents)│    FMP · News · Polygon
-  │ Control plane │              │ Data plane       │
-  └───────┬───────┘              └──────────────────┘
-          │ A2A/HTTP             ┌──────────────────┐
-          ├─────────────────────▶│ Committee        │
-          │                      │ (CrewAI)         │
-          │                      │ Bull · Bear · CIO│
-          │                      └──────────────────┘
-          ▼
-     PostgreSQL  ◀── evidence, thesis history, workflow checkpoints
-```
 
-| Component | Port | Role |
-|-----------|------|------|
-| Frontend | 3000 | Dashboard and human approval UI |
-| API | 8080 | Workflow orchestration, planning, safety, reports |
-| Specialists | 8081 | Data retrieval and analysis agents |
-| Committee | 8082 | Adversarial investment debate |
-| Postgres | 5432 | Persistent evidence and checkpoints |
+| Component                         | Responsibility                                                                                                                        |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| **Web Application (Next.js)**     | Lets users start research, review findings, and approve recommendations.                                                              |
+| **Workflow Engine (LangGraph)**   | Coordinates the entire research process, manages planning, human approval checkpoints, and report generation.                         |
+| **Research Agents (A2A)**         | Specialized AI analysts that gather evidence on financials, valuation, industry, competitors, news, SEC filings, earnings, and risks. |
+| **Investment Committee (CrewAI)** | Bull, Bear, and CIO agents debate the investment case before a recommendation is made.                                                |
+| **Data Sources**                  | Financial statements, SEC filings, market data, and news used throughout the research process.                                        |
+| **PostgreSQL**                    | Stores evidence, workflow state, checkpoints, and report history.                                                                     |
+
 
 For full technical design, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
 ## Technology Stack
+This project combines several AI frameworks, each chosen for a specific role.
 
-| Layer | Technologies |
-|-------|--------------|
-| **Frontend** | Next.js, React, TypeScript, Tailwind CSS |
-| **Orchestration** | LangGraph, FastAPI, PostgreSQL |
-| **Research agents** | A2A protocol, FastAPI, Python |
-| **Committee** | CrewAI |
-| **Shared contracts** | Pydantic (framework-agnostic schemas) |
-| **Data sources** | Yahoo Finance, SEC EDGAR, FMP, NewsAPI, Tavily, Polygon |
-| **Observability** | LangSmith (optional) |
-| **Infrastructure** | Docker Compose |
+| Framework        | Purpose                                                                    |
+| ---------------- | -------------------------------------------------------------------------- |
+| **LangGraph**    | Coordinates the research workflow and manages human approval steps         |
+| **A2A Protocol** | Allows independent AI agents to communicate with one another               |
+| **CrewAI**       | Simulates the investment committee discussion                              |
+| **LangSmith**    | Tracks and evaluates how the AI agents reason through the research process |
 
-**Course frameworks used:** LangGraph + HITL, A2A Protocol, CrewAI (minimum required: 2).
+
+**Course frameworks used:** LangGraph + HITL, A2A Protocol, CrewAI.
 
 ---
 

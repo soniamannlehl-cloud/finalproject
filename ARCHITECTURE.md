@@ -1,598 +1,333 @@
-# Investment Research Platform
-## Solution Architecture Document
+# Investment Research Platform — Architecture
 
-| | |
-|---|---|
-| **Document type** | Solution Architecture |
-| **Version** | 1.0 |
-| **Author** | Sonia Mannlehl |
-| **Course** | UCLA Extension — Agentic AI & Autonomous Systems (Capstone) |
-| **Repository** | https://github.com/soniamannlehl-cloud/finalproject |
-| **Status** | Final |
+**Sonia Mannlehl** · UCLA Extension — Agentic AI & Autonomous Systems (Capstone)  
+**Repository:** https://github.com/soniamannlehl-cloud/finalproject
 
-> **Disclaimer:** Academic capstone deliverable. For educational purposes only. Not investment advice.
+> ⚠️ Academic capstone project. For educational purposes only. Not investment advice.
+
+This document explains **how the platform is built**: the main parts, every agent, why I chose each framework, how data flows, and what I would improve. It is written to satisfy the course architecture and technical analysis requirements without reading like a corporate template.
 
 ---
 
-## 1. Executive Summary
+# Part I — Architecture
 
-The Investment Research Platform is a multi-agent solution that automates structured equity research for publicly traded companies. The platform emulates a professional research desk: it plans industry-aware analysis, delegates work to specialized agents, aggregates verifiable evidence, evaluates findings through safety controls and an adversarial investment committee, and produces a cited research report subject to human approval.
+## What I set out to build
 
-The solution is implemented as a **containerized, multi-service architecture** comprising a web channel, an orchestration tier, a research execution tier, a deliberation tier, and a persistence tier. Three course-mandated agent frameworks—**LangGraph (HITL)**, **A2A**, and **CrewAI**—each own a distinct concern within the overall design.
+Professional investors do not use one tool or one number. They use a **team** — people with different jobs who share findings, challenge each other, and only recommend action when the evidence supports it.
 
----
+I built the same pattern with AI:
 
-## 2. Business Context & Scope
+- A **planner** decides what to research (based on industry)
+- **Specialist analysts** each own one slice of the work
+- A **thesis** evolves as evidence arrives
+- A **committee** argues bull and bear sides
+- **You** confirm the company upfront and approve the report at the end
 
-### 2.1 Problem statement
-
-Investment research requires synthesizing heterogeneous sources—financial statements, regulatory filings, market data, news, peer comparisons, and risk indicators—into a defensible recommendation. Single-model chat approaches lack structured planning, evidence traceability, role separation, and governed human approval suitable for high-stakes analytical workflows.
-
-### 2.2 Solution objectives
-
-| Objective | Description |
-|-----------|-------------|
-| **Structured research** | Generate an explicit, industry-aware research plan before execution. |
-| **Evidence traceability** | Bind every analytical claim to retrievable evidence artifacts. |
-| **Controlled autonomy** | Automate research execution while retaining human gates at defined checkpoints. |
-| **Adversarial review** | Subject conclusions to explicit bull/bear deliberation prior to recommendation. |
-| **Fail-safe behavior** | Withhold directional guidance when evidence quality is insufficient. |
-
-### 2.3 Out of scope
-
-- Live trading or portfolio execution
-- Cross-session learning or model fine-tuning from user feedback
-- Hosted multi-tenant production deployment (current state: local Docker deployment)
+If evidence is too thin, the platform says **more research is needed** instead of guessing.
 
 ---
 
-## 3. Architecture Principles
+## The four main parts
 
-The following principles constrain all design decisions:
+The platform is not one big Python script. It is **four services** that talk over HTTP, plus a database.
 
-1. **Separation of concerns** — Planning, retrieval, deliberation, and persistence are assigned to distinct runtime boundaries.
-2. **Evidence before assertion** — No analytical claim may exist without at least one resolvable evidence reference.
-3. **Deterministic governance over probabilistic judgment** — Policy rules govern final recommendation eligibility; LLM output alone cannot authorize a directional call.
-4. **Human authority at defined checkpoints** — Automation pauses for explicit user confirmation and final approval.
-5. **Graceful degradation** — Missing data providers reduce coverage and are disclosed; they do not abort the workflow.
-6. **Bounded automation** — Retries, replans, and agent iterations are capped to prevent unbounded cost and runtime.
-
----
-
-## 4. Solution Overview
-
-### 4.1 Capability map
-
-| Capability | Primary owner |
-|------------|---------------|
-| User interaction & HITL presentation | Web application (Next.js) |
-| Workflow orchestration & checkpointing | API service (LangGraph) |
-| Research planning & task dispatch | API service |
-| Specialist research execution | Specialists service (A2A) |
-| Investment committee deliberation | Committee service (CrewAI) |
-| Evidence & report persistence | PostgreSQL (via API service) |
-| Shared domain contracts | `packages/contracts` (Pydantic) |
-
-### 4.2 Logical architecture
-
-The solution adheres to a **three-plane model**:
-
-| Plane | Responsibility | Must not |
-|-------|----------------|----------|
-| **Control plane** | Decide what to research, when, and in what order | Call external data providers directly |
-| **Data plane** | Retrieve, normalize, and compute research artifacts | Determine research scope or store persistent state |
-| **Deliberation plane** | Debate investment implications from supplied evidence | Fetch new data or persist outcomes |
-
----
-
-## 5. Architecture Views
-
-| View | Diagram | Purpose |
-|------|---------|---------|
-| §5.1 | Context | System boundary and external dependencies |
-| §5.2 | Container | Deployable services and integration rules |
-| §5.3 | Process | Orchestration stages and checkpoints |
-| **§5.4** | **Agent interaction** | **All agents and how they collaborate (primary agent diagram)** |
-| §8.3 | Sequence | Request-level data flow over time |
-
-### 5.1 Context view
-
-External actors and system boundary.
-
-```mermaid
-flowchart LR
-    Analyst([Research User])
-
-    subgraph Platform["Investment Research Platform"]
-        IRP[Platform Services]
-    end
-
-    subgraph External["External Systems"]
-        MKT[Market Data APIs]
-        SEC[SEC EDGAR]
-        NEWS[News & Search APIs]
-        LLM[OpenAI API]
-    end
-
-    Analyst <-->|HTTPS| IRP
-    IRP --> MKT & SEC & NEWS & LLM
+```
+┌─────────────────────────────────────────────────────────────┐
+│  YOU  ──►  Web app (:3000)  ──►  API service (:8080)        │
+│                                    │                        │
+│                                    ├──► Specialists (:8081)  │
+│                                    │         │              │
+│                                    │         ▼              │
+│                                    │    Yahoo · SEC · News  │
+│                                    │                        │
+│                                    ├──► Committee (:8082)    │
+│                                    │      Bull · Bear · CIO │
+│                                    │                        │
+│                                    └──► PostgreSQL (:5432)  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### 5.2 Container view (deployment architecture)
+| Part | What it does |
+|------|----------------|
+| **Web app** | Where you start research and approve checkpoints |
+| **API service** | Runs the workflow — planning, dispatch, thesis, safety, report |
+| **Specialists service** | Ten research agents that fetch and analyze data |
+| **Committee service** | Three agents that debate the investment case |
+| **PostgreSQL** | Stores evidence, thesis history, and checkpoints |
 
-Primary architecture diagram. Defines deployable units and authorized communication paths.
+**Three rules that keep the design clean:**
 
-```mermaid
-flowchart TB
-    User([User])
+1. The **web app only talks to the API** — never directly to research agents.
+2. The **API is the only part that writes to the database** — specialists return results; the API saves them.
+3. The **API decides what to research** — specialists do not choose their own tasks.
 
-    FE["Container: Web App<br/>:3000 · Next.js"]
+---
 
-    subgraph CTRL["Container: API Service<br/>:8080 · LangGraph + FastAPI"]
-        ORCH[Workflow Orchestrator]
-    end
+## Diagram: every agent and how they work together
 
-    subgraph DATA["Container: Specialists Service<br/>:8081 · A2A + FastAPI"]
-        AGT[Research Agent Pool<br/>10 agents · 11 capabilities]
-        SRC[External Data Integrations]
-    end
+This is the main architecture diagram. It shows **all agents** in the order they run.
 
-    subgraph DELIB["Container: Committee Service<br/>:8082 · CrewAI + FastAPI"]
-        COM[Bull · Bear · CIO Agents]
-    end
+```
+                              START
+                                │
+                                ▼
+                   ┌────────────────────────┐
+                   │ Company Validation     │  ← specialist agent
+                   │ (resolve ticker)       │
+                   └───────────┬────────────┘
+                               │
+                               ▼
+                   ┌────────────────────────┐
+                   │  CHECKPOINT 1          │  ← you confirm the company
+                   │  (human)               │
+                   └───────────┬────────────┘
+                               │
+                               ▼
+                   ┌────────────────────────┐
+                   │ Research Planner       │  ← picks industry profile,
+                   │                        │    builds research plan
+                   └───────────┬────────────┘
+                               │
+                               ▼
+                   ┌────────────────────────┐
+                   │ Research Director      │  ← assigns tasks to analysts
+                   └───────────┬────────────┘
+                               │
+         ┌─────────────────────┼─────────────────────┐
+         │                     │                     │
+         ▼                     ▼                     ▼
+   (parallel — only the agents the plan needs)
 
-    DB[("Container: PostgreSQL<br/>:5432")]
+   Company Profile      Financial Analyst     Valuation Analyst
+   Risk Analyst         Investment Driver     Competitor Analyst
+   News Analyst         SEC Filings           Earnings Analyst
 
-    User --> FE
-    FE <-->|REST| CTRL
-    CTRL -->|"A2A / HTTP"| DATA
-    AGT --> SRC
-    CTRL -->|"HTTP"| DELIB
-    CTRL <-->|SQL| DB
+         │                     │                     │
+         └─────────────────────┼─────────────────────┘
+                               │
+                               ▼
+                   ┌────────────────────────┐
+                   │ Evidence → PostgreSQL  │
+                   │ Thesis Agent           │  ← thesis updates here
+                   └───────────┬────────────┘
+                               │
+                    more tasks?├─── yes ──► back to Director
+                               │
+                               no
+                               ▼
+                   ┌────────────────────────┐
+                   │ Safety checks          │
+                   └───────────┬────────────┘
+                               │
+                               ▼
+                   ┌────────────────────────┐
+                   │ Investment Committee   │
+                   │  Bull → Bear → CIO     │
+                   └───────────┬────────────┘
+                               │
+                               ▼
+                   ┌────────────────────────┐
+                   │ Synthesizer            │  ← policy rules applied
+                   └───────────┬────────────┘
+                               │
+                               ▼
+                   ┌────────────────────────┐
+                   │ Report Generator       │
+                   └───────────┬────────────┘
+                               │
+                               ▼
+                   ┌────────────────────────┐
+                   │  CHECKPOINT 2          │  ← you approve, reject,
+                   │  (human)               │    or ask for more research
+                   └───────────┬────────────┘
+                               │
+                               ▼
+                             DONE
+                    (replan loops back to Planner)
 ```
 
-**Integration rules enforced by this view:**
+**Agent count:** 7 workflow agents in the API · 10 research specialists · 3 committee agents · 2 human checkpoints = **20 roles** in the full process.
 
-| From | To | Allowed | Notes |
-|------|-----|---------|-------|
-| Web App | API Service | ✅ | Sole client entry point |
-| Web App | Specialists / Committee | ❌ | No direct access |
-| API Service | Specialists | ✅ | Task dispatch via A2A |
-| API Service | Committee | ✅ | Evidence brief in / proposal out |
-| API Service | PostgreSQL | ✅ | Exclusive persistence owner |
-| Specialists | PostgreSQL | ❌ | Stateless; returns payloads to API |
-| Committee | PostgreSQL | ❌ | Stateless deliberation service |
-
-### 5.3 Process view (orchestration workflow)
-
-End-to-end process flow within the control plane.
-
-```mermaid
-flowchart TD
-    A([Start Run]) --> B[Validate Company]
-    B --> C{Checkpoint 1<br/>User confirms company}
-    C -->|Rejected| Z([Terminate])
-    C -->|Confirmed| D[Generate Research Plan]
-    D --> E[Dispatch Research Tasks]
-
-    E --> F[Execute Specialist Agents<br/>parallel per plan layer]
-    F --> G[Collect & Persist Evidence]
-    G --> H[Update Investment Thesis]
-    H --> I{Plan complete?}
-    I -->|No| E
-    I -->|Yes| J[Run Safety Pipeline]
-
-    J --> K[Convene Investment Committee]
-    K --> L[Apply Policy Gate]
-    L --> M[Generate Research Report]
-    M --> N{Checkpoint 2<br/>User decision}
-    N -->|Approve / Reject| O([Complete Run])
-    N -->|Request additional research| D
-```
-
-### 5.4 Agent interaction view (all agents)
-
-This diagram shows **every agent** in the platform, the order in which they participate, and how control flows between the orchestration tier, research tier, and committee tier. The Research Director invokes only the specialists required by the industry-specific plan—not all ten on every run. Tasks within a plan layer execute **in parallel**.
-
-```mermaid
-flowchart TD
-    USER([User / Analyst])
-
-    subgraph WEB["Web Application"]
-        UI[Dashboard UI]
-    end
-
-    USER <-->|start · approve · reject| UI
-    UI <-->|REST| LG
-
-    subgraph CTRL["Control Plane — API Service (LangGraph)"]
-        direction TB
-        LG[Workflow Engine]
-
-        VALN[Company Validation Node]
-        HITL1{Checkpoint 1<br/>Confirm company}
-        PLAN[Research Planner Agent]
-        DIR[Research Director Agent]
-
-        COLL[Collect & Merge Results]
-        THESIS[Thesis Agent]
-        SAFE[Safety Pipeline]
-        BRIEF[Build Evidence Brief]
-        SYN[Synthesizer Agent]
-        RPT[Report Generator Agent]
-        HITL2{Checkpoint 2<br/>Review report}
-
-        LG --> VALN --> HITL1
-        HITL1 -->|confirmed| PLAN --> DIR
-        DIR --> COLL --> THESIS
-        THESIS -->|more plan layers| DIR
-        THESIS -->|research complete| SAFE
-        SAFE --> BRIEF
-        BRIEF --> SYN --> RPT --> HITL2
-        HITL2 -->|replan| PLAN
-        HITL2 -->|approve / reject| LG
-    end
-
-    subgraph SPEC["Data Plane — Specialists Service (A2A)"]
-        direction TB
-
-        S_VAL[Company Validation Agent]
-        S_PRO[Company Profile Agent]
-        S_FIN[Financial Analyst Agent<br/>statements · ratios]
-        S_VALU[Valuation Analyst Agent]
-        S_RISK[Risk Analyst Agent]
-        S_DRV[Investment Driver Agent]
-        S_COMP[Competitor Analyst Agent]
-        S_NEWS[News Analyst Agent]
-        S_SEC[SEC Filings Agent]
-        S_EARN[Earnings Analyst Agent]
-
-        EXT[(External Data<br/>yfinance · SEC · FMP · News · Polygon)]
-    end
-
-    subgraph COM["Deliberation Plane — Committee Service (CrewAI)"]
-        direction LR
-        BULL[Bull Analyst Agent]
-        BEAR[Bear Analyst Agent]
-        CIO[CIO Agent]
-        BULL --> BEAR --> CIO
-    end
-
-    DB[(PostgreSQL<br/>evidence · thesis · reports)]
-
-    VALN -->|A2A| S_VAL
-    DIR -->|A2A parallel dispatch| S_PRO & S_FIN & S_VALU & S_RISK & S_DRV & S_COMP & S_NEWS & S_SEC & S_EARN
-    S_PRO & S_FIN & S_VALU & S_RISK & S_DRV & S_COMP & S_NEWS & S_SEC & S_EARN -->|evidence + claims| COLL
-    S_PRO & S_FIN & S_VALU & S_RISK & S_DRV & S_COMP & S_NEWS & S_SEC & S_EARN --> EXT
-
-    BRIEF -->|HTTP evidence brief| BULL
-    CIO -->|committee proposal| SYN
-
-    COLL --> DB
-    THESIS --> DB
-    RPT --> DB
-```
-
-**How to read this diagram**
-
-| Step | What happens |
-|------|--------------|
-| 1 | User submits a ticker via the web application. |
-| 2 | **Company Validation Agent** resolves the entity (public / private / unknown). |
-| 3 | **Checkpoint 1** — user confirms the correct company before research spend. |
-| 4 | **Research Planner Agent** selects an industry profile and emits a task plan (DAG). |
-| 5 | **Research Director Agent** dispatches plan tasks to specialist agents **in parallel layers** via A2A. |
-| 6 | Specialist agents return evidence; the API persists results and **Thesis Agent** updates the investment thesis after each layer. |
-| 7 | Steps 5–6 repeat until all plan layers are complete. |
-| 8 | **Safety Pipeline** validates coverage, citations, freshness, and contradictions. |
-| 9 | An evidence brief is sent to the **Investment Committee** — **Bull → Bear → CIO** debate sequentially. |
-| 10 | **Synthesizer Agent** applies deterministic policy rules to the committee proposal. |
-| 11 | **Report Generator Agent** produces the final research report. |
-| 12 | **Checkpoint 2** — user approves, rejects, or requests additional research (replan). |
-
-**Agent inventory (18 logical roles)**
-
-| Tier | Agents |
-|------|--------|
-| Control plane (7) | Research Planner, Research Director, Thesis, Safety Pipeline, Synthesizer, Report Generator, Company Validation Node |
-| Research specialists (10) | Company Validation, Company Profile, Financial, Valuation, Risk, Investment Driver, Competitor, News, SEC Filings, Earnings |
-| Investment committee (3) | Bull Analyst, Bear Analyst, CIO |
-| Human checkpoints (2) | Checkpoint 1 (confirm company), Checkpoint 2 (approve report) |
+Not every specialist runs on every company. A bank gets different metrics than a REIT — the Planner decides who to call.
 
 ---
 
-## 6. Component Specification
+## Agent roles (quick reference)
 
-### 6.1 Web application
+### Workflow agents (API service)
 
-| Attribute | Value |
-|-----------|-------|
-| **Technology** | Next.js, React, TypeScript, Tailwind CSS |
-| **Port** | 3000 |
-| **Responsibilities** | Run initiation, checkpoint presentation, evidence/thesis/report visualization, user decision capture |
-| **Dependencies** | API service (REST) |
+| Agent | Job |
+|-------|-----|
+| Research Planner | Build an industry-specific research plan |
+| Research Director | Send tasks to specialists and track results |
+| Thesis Agent | Keep the investment thesis updated as evidence arrives |
+| Safety Pipeline | Check coverage, citations, stale data, contradictions |
+| Synthesizer | Apply hard rules to the committee recommendation |
+| Report Generator | Build the final HTML/PDF report |
 
-### 6.2 API service (control plane)
+### Research specialists (10 agents)
 
-| Attribute | Value |
-|-----------|-------|
-| **Technology** | FastAPI, LangGraph, PostgreSQL checkpointer |
-| **Port** | 8080 |
-| **Responsibilities** | Workflow state machine, HITL interrupts, research planning, task orchestration, thesis management, safety enforcement, policy gating, report generation |
-| **Dependencies** | Specialists service (A2A), Committee service (HTTP), PostgreSQL |
+| Agent | Researches |
+|-------|------------|
+| Company Validation | Is this ticker valid and public? |
+| Company Profile | Sector, industry, business description |
+| Financial Analyst | Statements and ratios (math done in Python, not by the LLM) |
+| Valuation Analyst | Peer-relative valuation |
+| Risk Analyst | Industry-aware risk flags |
+| Investment Driver | Key KPIs for this industry |
+| Competitor Analyst | How the company ranks vs peers |
+| News Analyst | Recent news tone and coverage |
+| SEC Filings | Material EDGAR filings |
+| Earnings Analyst | Beat/miss history |
 
-**Orchestration agents (logical components):**
+### Investment committee (CrewAI)
 
-| Component | Function |
-|-----------|----------|
-| Company Validation | Entity resolution and eligibility classification |
-| Research Planner | Industry profile selection; `ResearchPlan` generation |
-| Research Director | Capability-based dispatch, retry handling, result aggregation |
-| Thesis Agent | Versioned investment thesis maintenance |
-| Safety Pipeline | Coverage, citation, freshness, and semantic integrity checks |
-| Synthesizer | Deterministic recommendation policy enforcement |
-| Report Generator | Structured report rendering (HTML/PDF) |
+| Agent | Job |
+|-------|-----|
+| Bull Analyst | Make the strongest case **for** investing |
+| Bear Analyst | Make the strongest case **against** investing |
+| CIO | Weigh both sides and propose buy / hold / sell / insufficient evidence |
 
-### 6.3 Specialists service (data plane)
-
-| Attribute | Value |
-|-----------|-------|
-| **Technology** | FastAPI, A2A protocol |
-| **Port** | 8081 |
-| **Responsibilities** | Execute domain-specific research tasks; integrate external data sources; return structured evidence |
-| **Agent count** | 10 agents exposing 11 capabilities |
-
-| Research domain | Agent | Capabilities |
-|-----------------|-------|--------------|
-| Entity resolution | Company Validation | `company.validate` |
-| Company profile | Company Profile | `company.profile` |
-| Financial analysis | Financial Analyst | `financials.statements`, `financials.ratios` |
-| Valuation | Valuation Analyst | `valuation.estimate` |
-| Risk | Risk Analyst | `risk.analysis` |
-| Investment drivers | Investment Driver | `investment.drivers` |
-| Peers | Competitor Analyst | `competitors.analysis` |
-| News | News Analyst | `news.sentiment` |
-| Regulatory | SEC Filings | `filings.sec` |
-| Earnings | Earnings Analyst | `earnings.call` |
-
-**Execution pattern:** fixed workflow per agent (fetch → normalize → deterministic computation → optional LLM interpretation). Financial metrics are computed in Python; LLMs do not perform arithmetic.
-
-### 6.4 Committee service (deliberation plane)
-
-| Attribute | Value |
-|-----------|-------|
-| **Technology** | FastAPI, CrewAI |
-| **Port** | 8082 |
-| **Responsibilities** | Adversarial review via Bull, Bear, and CIO personas |
-| **Input** | Condensed evidence brief (size-capped) |
-| **Output** | Structured committee proposal (action, confidence, rationale) |
-| **Constraints** | No data retrieval; no persistence; no cross-run memory |
-
-### 6.5 Persistence tier
-
-| Attribute | Value |
-|-----------|-------|
-| **Technology** | PostgreSQL 16 |
-| **Port** | 5432 |
-| **Stored entities** | Evidence, claims, thesis versions, LangGraph checkpoints, reports, tool-call metadata |
-| **Access pattern** | Read/write exclusively via API service |
-
-### 6.6 Shared contracts module
-
-| Attribute | Value |
-|-----------|-------|
-| **Package** | `packages/contracts` (`irp-contracts`) |
-| **Technology** | Pydantic (framework-neutral) |
-| **Purpose** | Canonical schemas for evidence, plans, thesis, safety, recommendations, and industry profiles across all services |
+The committee only sees a **short evidence brief** — it cannot go fetch new data or invent numbers that were not gathered.
 
 ---
 
-## 7. Framework Selection & Rationale
+## Why I used these frameworks
 
-### 7.1 Course framework alignment
+The course requires at least two agent frameworks. I used **three**, each for a job it is actually good at.
 
-Minimum requirement: **two** frameworks. Implemented: **three**.
+| Framework | Where | Why |
+|-----------|-------|-----|
+| **LangGraph + HITL** | API service | The workflow pauses twice for you to approve. LangGraph can interrupt, save state to Postgres, and resume when you click a button. |
+| **A2A Protocol** | Specialists service | Research agents run as their own service. The Director discovers them at runtime instead of hard-coding imports. |
+| **CrewAI** | Committee service | Bull/Bear/CIO role-play is what CrewAI is built for. The committee is short and self-contained — it does not need workflow checkpointing. |
 
-| Framework | Role in solution | Rationale |
-|-----------|------------------|-----------|
-| **LangGraph + HITL** | Workflow orchestration, checkpointing, human interrupts | Supports durable pause/resume at two approval gates across independent HTTP sessions. |
-| **A2A Protocol** | Inter-service agent discovery and task dispatch | Enables independently deployable research agents with runtime capability routing. |
-| **CrewAI** | Committee role-play deliberation | Optimal fit for bounded adversarial multi-persona debate without workflow state requirements. |
-
-### 7.2 Evaluated alternatives
-
-| Option | Decision | Rationale |
-|--------|----------|-----------|
-| **Google ADK** (specialist runtime) | Not adopted | Specialists are deterministic retrieval/compute pipelines; ADK would duplicate orchestration already owned by the control plane. |
-| **n8n** | Not adopted | Not required; three agent frameworks already satisfy course requirements. |
-| **Monolithic single service** | Not adopted | Would collapse A2A boundaries, inflate control-plane image size, and increase failure blast radius. |
+**Google ADK — I looked at it, did not use it.** Specialist agents mostly fetch data and run Python calculations. They are not open-ended chat agents. Putting them in a heavy agent runtime would duplicate work the API already does.
 
 ---
 
-## 8. Data Architecture & Flow
+## How data flows
 
-### 8.1 Research planning artifact
+Plain sequence — no jargon:
 
-The Planner produces a **`ResearchPlan`**: a validated directed acyclic graph of `TaskSpec` entries. Each task references a **capability** (e.g., `financials.ratios`), not a concrete agent identity. Industry profiles (`packages/contracts/industry_profiles/`) parameterize metrics, valuation methods, and risk rules per sector.
+1. You enter a ticker in the web app.
+2. The API validates the company (via the validation specialist).
+3. You confirm at Checkpoint 1.
+4. The Planner writes a research plan (tasks + dependencies, tailored to industry).
+5. The Director sends tasks to specialists **in parallel batches**.
+6. Each specialist calls external APIs, computes metrics, returns evidence.
+7. The API saves evidence to Postgres and updates the thesis.
+8. Steps 5–7 repeat until the plan is finished.
+9. Safety checks run on all evidence.
+10. The API sends a condensed brief to the committee; Bull, Bear, and CIO debate.
+11. The Synthesizer applies policy rules (can block a buy/sell if evidence is weak).
+12. The report is generated.
+13. You review at Checkpoint 2 — approve, reject, or request more research.
 
-### 8.2 State partitioning
+**Data sources used:** Yahoo Finance, SEC EDGAR, FMP, NewsAPI, Tavily, Polygon/Massive. Only OpenAI is required; the rest have fallbacks or graceful degradation.
 
-| Concern | LangGraph checkpoint state | PostgreSQL |
-|---------|---------------------------|------------|
-| Workflow control | ticker, plan, task status, HITL decisions | — |
-| Reference indexes | evidence ID lists, thesis version pointer | full evidence payloads, claims |
-| Analytical outputs | safety flags, scores | thesis history, reports |
+**Where things live:**
 
-Large binary and textual payloads remain in PostgreSQL to minimize checkpoint size and optimize HITL resume latency.
-
-### 8.3 End-to-end data flow
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant W as Web App
-    participant A as API Service
-    participant S as Specialists Service
-    participant C as Committee Service
-    participant D as PostgreSQL
-
-    U->>W: Submit ticker
-    W->>A: Initiate research run
-    A-->>W: Present Checkpoint 1
-    U->>W: Confirm entity
-    W->>A: Resume workflow
-
-    loop Until plan layers exhausted
-        A->>S: A2A task dispatch (capability-based)
-        S-->>A: Evidence + claims payload
-        A->>D: Persist artifacts
-        A->>A: Update thesis version
-    end
-
-    A->>A: Execute safety pipeline
-    A->>C: Submit evidence brief
-    C-->>A: Return committee proposal
-    A->>A: Apply policy gate
-    A->>A: Generate report
-    A-->>W: Present Checkpoint 2
-    U->>W: Approve / reject / request replan
-    W->>A: Resume workflow
-    A->>D: Finalize run record
-```
-
-### 8.4 External data integrations
-
-| Source | Domain | Fallback |
-|--------|--------|----------|
-| Yahoo Finance (yfinance) | Quotes, statements | Primary keyless anchor |
-| Financial Modeling Prep | Statements | yfinance |
-| SEC EDGAR | Regulatory filings | FMP |
-| NewsAPI | Company news | Tavily |
-| Tavily | Web search | — |
-| Polygon / Massive | Market quotes | yfinance |
+| In memory / workflow state | In PostgreSQL |
+|----------------------------|---------------|
+| Current plan, task status | Evidence payloads |
+| Evidence ID lists | Claims, thesis versions |
+| Checkpoint decisions | Reports |
 
 ---
 
-## 9. Non-Functional Design
+## Key design decisions
 
-### 9.1 Guardrail layers
-
-| Layer | Mechanism | Type |
-|-------|-----------|------|
-| L0 | Schema enforcement — claims require evidence IDs | Deterministic |
-| L1 | Coverage, citation resolution, data freshness | Deterministic |
-| L2 | Contradiction and hallucination detection | LLM-assisted |
-| L3 | Recommendation policy gate | Deterministic |
-| L4 | Human approval (Checkpoint 2) | Human |
-
-The committee proposes; the policy gate disposes. A high-confidence committee recommendation may still be blocked if evidence thresholds are not met.
-
-### 9.2 Operational characteristics
-
-| Attribute | Approach |
-|-----------|----------|
-| **Deployment** | Docker Compose; single-command startup |
-| **Health monitoring** | Container health checks per service |
-| **Observability** | LangSmith tracing with cross-service `traceparent` propagation |
-| **Resilience** | Task retries, provider failover, declared-gap reporting |
-| **Cost control** | Model tiering, capped brief size, bounded replan/retry limits |
-
----
-
-## 10. Key Architecture Decisions
-
-| ID | Decision | Drivers | Implications |
-|----|----------|---------|--------------|
-| AD-01 | Three-service decomposition | A2A semantics, image size, fault isolation | Network hop overhead; distributed tracing required |
-| AD-02 | Static graph + dynamic dispatch | Checkpoint compatibility | Plan-driven parallelism via LangGraph `Send` API |
-| AD-03 | Capability-based routing | Planner–agent decoupling | Agent registration via A2A AgentCards |
-| AD-04 | API-exclusive persistence | Single source of truth | Specialists and committee remain stateless |
-| AD-05 | Deterministic financial computation | Auditability, accuracy | Reduced LLM autonomy at data layer |
-| AD-06 | Capped committee brief | Cost and citation control | Committee cannot reference off-brief evidence |
-| AD-07 | Framework-neutral contracts package | Cross-service schema consistency | Additional module maintenance |
+| I chose… | Because… | Tradeoff |
+|----------|----------|----------|
+| Separate services | Real agent boundaries; committee failures do not crash the workflow | More moving parts in Docker |
+| A research **plan** before execution | Banks and REITs need different analysis — visible and testable | Not a one-size-fits-all pipeline |
+| Python for financial math | LLMs make arithmetic mistakes | Less “magic” at the data layer |
+| Policy rules after the committee | A confident LLM debate should not override weak evidence | Can block flashy but unsupported calls |
+| Capped retries and replans | Prevents runaway cost and infinite loops | Sometimes stops before “perfect” |
 
 ---
 
 # Part II — Technical Analysis
 
-## 11. Planning Paradigm
+## Planning: how the platform decides what to do
 
-### 11.1 Selected approach
+I use **three planning styles**, depending on how predictable the work is:
 
-The solution implements **hierarchical task decomposition with monitored replanning**, applied at different layers according to task predictability:
+**Specialist agents — fixed steps, not ReAct.**  
+Each analyst follows the same path every time: get data → clean it → compute → optionally interpret. I did not give them a free-form “pick any tool” loop because the steps are already known, and a free agent might skip SEC filings or stop early.
 
-| Layer | Paradigm | Justification |
-|-------|----------|---------------|
-| Specialist agents | **Fixed workflow** | Data sources and processing steps are known a priori; dynamic ReAct selection introduces avoidable non-determinism. |
-| Research Planner | **Explicit hierarchical decomposition** | Industry-dependent research structure is emitted as a validated, inspectable `ResearchPlan` artifact. |
-| HITL replan path | **Monitor-and-revise** | User-requested additional analysis triggers a new plan revision; only delta tasks are re-dispatched. |
+**The Planner — explicit task breakdown.**  
+Before any research runs, the Planner outputs a structured plan: which capabilities to call, in what order, with what industry metrics. That plan shows up in the UI. This is **hierarchical decomposition** — break the big job into smaller jobs with dependencies.
 
-### 11.2 Rejected paradigms
+**Checkpoint 2 — replan when you ask for more.**  
+If you request additional analysis, the Planner writes a new plan version. The Director only re-runs tasks that were not already done. This is **monitor-and-revise** — fix the plan, do not just patch the report text.
 
-| Paradigm | Limitation in this domain |
-|----------|---------------------------|
-| Pure ReAct (single autonomous agent) | Insufficient structure for industry-specific analysis; weak citation enforcement; unbounded cost |
-| Pure static pipeline | Cannot adapt metrics and valuation methods across industries |
-| Unvalidated LLM-generated plans | Risk of cyclic dependencies and non-terminating execution |
+**What I did not do:** a single ReAct agent doing everything (too messy, hard to cite evidence), or a fixed pipeline identical for every industry (wrong metrics for banks vs tech).
 
 ---
 
-## 12. Coordination Model
+## Coordination: how agents work together
 
-### 12.1 Selected model
+The main pattern is **orchestrator + workers**:
 
-**Orchestrator–worker with capability routing.** A central LangGraph state machine coordinates stage transitions. The Director dispatches work to specialist workers through A2A. The committee operates as an invoked deliberation worker upon completion of research and safety validation.
+- **LangGraph** (orchestrator) owns the step-by-step workflow.
+- **Director** (worker dispatcher) sends jobs to specialists via A2A.
+- **Committee** is a separate worker called once research is done.
 
-### 12.2 Comparative analysis
+```
+        LangGraph orchestrator
+               │
+     ┌─────────┼─────────┐
+     ▼         ▼         ▼
+ Financial  Valuation   Risk  …  (specialists)
+     │         │         │
+     └─────────┴─────────┘
+               │
+               ▼
+         Bull / Bear / CIO
+               │
+               ▼
+         back to orchestrator
+```
 
-| Model | Description | Fit |
-|-------|-------------|-----|
-| **Orchestrator–worker** *(selected)* | Hub assigns tasks along known dependencies | ✅ Optimal — research DAG is predefined and auditable |
-| **Autonomous conversation** | Agents negotiate execution order (e.g., AutoGen) | ❌ Poor — hides dependency structure; complicates retry semantics |
-| **Blackboard** | Opportunistic shared-memory collaboration | ⚠️ Partial — evidence store resembles blackboard; routing remains explicit |
-| **Market-based allocation** | Agents bid on tasks | ❌ Unnecessary complexity for fixed capability catalog |
+**Compared to alternatives:**
 
-A2A introduces **capability-based worker selection** within the orchestrator pattern: agents are discovered at runtime via AgentCards rather than hardcoded bindings.
+| Approach | My take |
+|----------|---------|
+| **Orchestrator + workers** (what I built) | Research steps have known order (valuation needs financials first). Easy to debug. |
+| **Group chat** (e.g. AutoGen agents talking to each other) | Would hide that structure. Hard to retry one failed step. |
+| **Shared blackboard** (agents grab work from a pool) | Evidence store is shared, but the Director explicitly assigns tasks — not a free-for-all. |
 
----
-
-## 13. Constraints, Risks & Limitations
-
-| Category | Item | Impact | Mitigation (current / future) |
-|----------|------|--------|-------------------------------|
-| **Functional** | 13 industry profiles | Generic fallback for unmatched sectors | Expand profile library |
-| **Functional** | No cross-run learning | Each session is independent | Future feedback loop (out of scope) |
-| **Operational** | Local deployment only | Reviewers must run Docker locally | Planned hosted deployment |
-| **Quality** | LLM-based semantic safety | Inherited model uncertainty | Deterministic layers as primary gate |
-| **Cost** | Committee LLM usage | Dominates per-run token spend | Brief capping, model tiering |
-| **Scalability** | Single-instance services | No horizontal scaling | Future queue-backed dispatch |
-| **Security** | API key management | Relies on environment configuration | `.env` excluded from source control |
-
----
-
-## 14. Technology Stack Summary
-
-| Tier | Technologies |
-|------|--------------|
-| Presentation | Next.js, React, TypeScript, Tailwind CSS |
-| Orchestration | LangGraph, FastAPI, PostgreSQL |
-| Research execution | A2A protocol, FastAPI, Python |
-| Deliberation | CrewAI |
-| Integration | yfinance, SEC EDGAR, FMP, NewsAPI, Tavily, Polygon |
-| Contracts | Pydantic (`irp-contracts`) |
-| Infrastructure | Docker Compose |
-| Observability | LangSmith (optional) |
+Specialists **never call each other**. If valuation needs financials, that dependency is in the plan — not a side conversation between agents.
 
 ---
 
-## 15. Document Control
+## Limitations (honest)
 
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 1.0 | 2026 | Sonia Mannlehl | Initial solution architecture for capstone submission |
+| Limitation | What it means in practice |
+|------------|---------------------------|
+| 13 industry profiles | Unknown industries get a generic plan — less tailored metrics |
+| No learning across runs | Each research run starts fresh |
+| Runs locally in Docker | Reviewers need to run it themselves or watch a screen recording |
+| Committee uses real LLM calls | Most expensive part of each run |
+| Semantic safety checks use an LLM | Can miss things; deterministic checks are the real safety net |
+| No hard token budget per run | Retries are capped, but total spend is not |
 
-**Related artifacts:** [README.md](README.md) (operational guide) · [docs/AGENTS.md](docs/AGENTS.md) (agent catalog) · [docs/GUARDRAILS.md](docs/GUARDRAILS.md) (control reference)
+**What I would add next:** hosted demo URL, more industry profiles, per-run cost caps, and publishing the shared contracts package so others can reuse the schemas.
 
 ---
 
-*Diagrams use Mermaid notation and render in GitHub Markdown without image assets. Export to PDF via browser print for submission.*
+## Course frameworks (summary)
+
+| Framework | Used? |
+|-----------|-------|
+| LangGraph + HITL | ✅ |
+| A2A Protocol | ✅ |
+| CrewAI | ✅ |
+| Google ADK | ❌ evaluated, not used |
+| n8n | ❌ not needed |
+
+---
+
+*Related docs: [README.md](README.md) (how to run it) · [docs/AGENTS.md](docs/AGENTS.md) (agent file paths)*

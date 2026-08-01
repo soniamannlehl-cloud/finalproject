@@ -87,6 +87,14 @@ The solution adheres to a **three-plane model**:
 
 ## 5. Architecture Views
 
+| View | Diagram | Purpose |
+|------|---------|---------|
+| §5.1 | Context | System boundary and external dependencies |
+| §5.2 | Container | Deployable services and integration rules |
+| §5.3 | Process | Orchestration stages and checkpoints |
+| **§5.4** | **Agent interaction** | **All agents and how they collaborate (primary agent diagram)** |
+| §8.3 | Sequence | Request-level data flow over time |
+
 ### 5.1 Context view
 
 External actors and system boundary.
@@ -181,6 +189,115 @@ flowchart TD
     N -->|Approve / Reject| O([Complete Run])
     N -->|Request additional research| D
 ```
+
+### 5.4 Agent interaction view (all agents)
+
+This diagram shows **every agent** in the platform, the order in which they participate, and how control flows between the orchestration tier, research tier, and committee tier. The Research Director invokes only the specialists required by the industry-specific plan—not all ten on every run. Tasks within a plan layer execute **in parallel**.
+
+```mermaid
+flowchart TD
+    USER([User / Analyst])
+
+    subgraph WEB["Web Application"]
+        UI[Dashboard UI]
+    end
+
+    USER <-->|start · approve · reject| UI
+    UI <-->|REST| LG
+
+    subgraph CTRL["Control Plane — API Service (LangGraph)"]
+        direction TB
+        LG[Workflow Engine]
+
+        VALN[Company Validation Node]
+        HITL1{Checkpoint 1<br/>Confirm company}
+        PLAN[Research Planner Agent]
+        DIR[Research Director Agent]
+
+        COLL[Collect & Merge Results]
+        THESIS[Thesis Agent]
+        SAFE[Safety Pipeline]
+        BRIEF[Build Evidence Brief]
+        SYN[Synthesizer Agent]
+        RPT[Report Generator Agent]
+        HITL2{Checkpoint 2<br/>Review report}
+
+        LG --> VALN --> HITL1
+        HITL1 -->|confirmed| PLAN --> DIR
+        DIR --> COLL --> THESIS
+        THESIS -->|more plan layers| DIR
+        THESIS -->|research complete| SAFE
+        SAFE --> BRIEF
+        BRIEF --> SYN --> RPT --> HITL2
+        HITL2 -->|replan| PLAN
+        HITL2 -->|approve / reject| LG
+    end
+
+    subgraph SPEC["Data Plane — Specialists Service (A2A)"]
+        direction TB
+
+        S_VAL[Company Validation Agent]
+        S_PRO[Company Profile Agent]
+        S_FIN[Financial Analyst Agent<br/>statements · ratios]
+        S_VALU[Valuation Analyst Agent]
+        S_RISK[Risk Analyst Agent]
+        S_DRV[Investment Driver Agent]
+        S_COMP[Competitor Analyst Agent]
+        S_NEWS[News Analyst Agent]
+        S_SEC[SEC Filings Agent]
+        S_EARN[Earnings Analyst Agent]
+
+        EXT[(External Data<br/>yfinance · SEC · FMP · News · Polygon)]
+    end
+
+    subgraph COM["Deliberation Plane — Committee Service (CrewAI)"]
+        direction LR
+        BULL[Bull Analyst Agent]
+        BEAR[Bear Analyst Agent]
+        CIO[CIO Agent]
+        BULL --> BEAR --> CIO
+    end
+
+    DB[(PostgreSQL<br/>evidence · thesis · reports)]
+
+    VALN -->|A2A| S_VAL
+    DIR -->|A2A parallel dispatch| S_PRO & S_FIN & S_VALU & S_RISK & S_DRV & S_COMP & S_NEWS & S_SEC & S_EARN
+    S_PRO & S_FIN & S_VALU & S_RISK & S_DRV & S_COMP & S_NEWS & S_SEC & S_EARN -->|evidence + claims| COLL
+    S_PRO & S_FIN & S_VALU & S_RISK & S_DRV & S_COMP & S_NEWS & S_SEC & S_EARN --> EXT
+
+    BRIEF -->|HTTP evidence brief| BULL
+    CIO -->|committee proposal| SYN
+
+    COLL --> DB
+    THESIS --> DB
+    RPT --> DB
+```
+
+**How to read this diagram**
+
+| Step | What happens |
+|------|--------------|
+| 1 | User submits a ticker via the web application. |
+| 2 | **Company Validation Agent** resolves the entity (public / private / unknown). |
+| 3 | **Checkpoint 1** — user confirms the correct company before research spend. |
+| 4 | **Research Planner Agent** selects an industry profile and emits a task plan (DAG). |
+| 5 | **Research Director Agent** dispatches plan tasks to specialist agents **in parallel layers** via A2A. |
+| 6 | Specialist agents return evidence; the API persists results and **Thesis Agent** updates the investment thesis after each layer. |
+| 7 | Steps 5–6 repeat until all plan layers are complete. |
+| 8 | **Safety Pipeline** validates coverage, citations, freshness, and contradictions. |
+| 9 | An evidence brief is sent to the **Investment Committee** — **Bull → Bear → CIO** debate sequentially. |
+| 10 | **Synthesizer Agent** applies deterministic policy rules to the committee proposal. |
+| 11 | **Report Generator Agent** produces the final research report. |
+| 12 | **Checkpoint 2** — user approves, rejects, or requests additional research (replan). |
+
+**Agent inventory (18 logical roles)**
+
+| Tier | Agents |
+|------|--------|
+| Control plane (7) | Research Planner, Research Director, Thesis, Safety Pipeline, Synthesizer, Report Generator, Company Validation Node |
+| Research specialists (10) | Company Validation, Company Profile, Financial, Valuation, Risk, Investment Driver, Competitor, News, SEC Filings, Earnings |
+| Investment committee (3) | Bull Analyst, Bear Analyst, CIO |
+| Human checkpoints (2) | Checkpoint 1 (confirm company), Checkpoint 2 (approve report) |
 
 ---
 

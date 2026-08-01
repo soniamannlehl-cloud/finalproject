@@ -1,6 +1,6 @@
-# AI Investment Research Analyst
+#Investment Research Platform
 
-**A multi-agent AI system that simulates how a professional investment research firm analyzes a public company — with cited evidence, human approval gates, and the ability to refuse a recommendation when data is insufficient.**
+**An AI-powered investment research platform that simulates the workflow of a professional equity research firm. Instead of relying on a single AI assistant, a team of specialized AI analysts collaborates to research a publicly traded company, evaluate evidence, debate investment opportunities, and produce a transparent investment report that keeps humans in control of the final decision.**
 
 > ⚠️ **Academic capstone project.** This is not investment advice.
 

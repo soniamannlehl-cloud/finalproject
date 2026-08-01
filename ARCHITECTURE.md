@@ -1,6 +1,6 @@
 # Investment Research Platform — Architecture
 
-**Sonia Mannlehl** · UCLA Extension — Agentic AI & Autonomous Systems (Capstone)  
+**Sonia Mann** · UCLA Extension — Agentic AI & Autonomous Systems (Capstone)  
 **Repository:** https://github.com/soniamannlehl-cloud/finalproject
 
 > ⚠️ Academic capstone project. For educational purposes only. Not investment advice.

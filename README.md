@@ -6,6 +6,15 @@
 
 ---
 
+## Demo Videos
+
+| Video | Link |
+| ----- | ---- |
+| **Project Overview** | [Watch on Descript](https://share.descript.com/view/6yjRRA0YlL3) |
+| **Platform Demo** | [Watch on Descript](https://share.descript.com/view/XdtJjAwLuML) |
+
+---
+
 ## Why I Built It
 
 Researching a company before investing isn't simple.

@@ -125,37 +125,6 @@ For full technical design, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
-## Screenshots
-
-<!-- Add PNG/JPG files to docs/screenshots/ and uncomment the lines below -->
-
-<!--
-### Home — start a research run
-![Start research](docs/screenshots/home.png)
-
-### Checkpoint #1 — confirm company
-![Company confirmation](docs/screenshots/checkpoint-1.png)
-
-### Research in progress — evidence and thesis
-![Live research dashboard](docs/screenshots/research-progress.png)
-
-### Checkpoint #2 — review report and recommendation
-![Final approval](docs/screenshots/checkpoint-2.png)
-
-### Investment report
-![Generated report](docs/screenshots/report.png)
--->
-
-Screenshots are not yet checked into the repo. To add them:
-
-1. Capture images while running the app at http://localhost:3000
-2. Save to `docs/screenshots/` (e.g. `home.png`, `checkpoint-2.png`)
-3. Uncomment the block above
-
-**Demo video:** `[Add your demo video link here]`
-
----
-
 ## Installation
 
 **Prerequisites**

@@ -28,11 +28,12 @@ RUN pip install -e /app/packages/contracts
 | `plan.py` | `ResearchPlan`, `TaskSpec` — self-validating task DAG |
 | `a2a.py` | `A2ATaskRequest`, `A2ATaskResult` — agent communication envelopes |
 | `policy.py` | `apply_recommendation_gate()` — deterministic recommendation gating |
-| `thesis.py` | `ThesisVersion`, `ThesisHistory` — versioned investment thesis |
+| `thesis.py` | `ThesisVersion`, `StructuredThesis` — versioned investment thesis |
 | `safety.py` | `SafetyReport`, `CoverageReport` — safety pipeline output |
 | `recommendation.py` | `Recommendation`, `CommitteePosition` |
 | `report.py` | `InvestmentReport`, `ReportSection` |
-| `enums.py` | Capabilities, playbooks, HITL decisions |
+| `industry_profiles/` | Industry-specific metrics, valuation methods, risk rules |
+| `enums.py` | Capabilities, industry classifications, HITL decisions |
 
 ## Example
 

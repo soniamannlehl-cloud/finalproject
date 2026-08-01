@@ -21,7 +21,7 @@ This project satisfies the capstone **mandatory framework** rule (≥2 of 5):
 **Minimum technical scope:** multi-agent (15+ roles), explicit planning (`ResearchPlan`),
 6+ external data sources, 2 HITL checkpoints, LangSmith tracing, graceful degradation.
 
-Full rubric mapping: [`docs/RUBRIC_ALIGNMENT.md`](docs/RUBRIC_ALIGNMENT.md).
+Full course requirements mapping is maintained locally (not in the public repo).
 
 ---
 
@@ -68,7 +68,7 @@ Three design commitments shape everything below:
 │ data plane         │ │ deliberation        │     │
 │ FastAPI + a2a-sdk  │ │ FastAPI + CrewAI    │     │
 │                    │ │                     │     │
-│ 9 agents, each     │ │ Bull · Bear · CIO   │     │
+│ 10 agents, each    │ │ Bull · Bear · CIO   │     │
 │ publishing an      │ │ stateless; receives │     │
 │ AgentCard          │ │ a condensed brief   │     │
 │ Retrieves. Never   │ │ Argues. Never       │     │
@@ -563,7 +563,7 @@ overkill for a small fixed set of safety-relevant formulas).
 
 - Persist AgentCards in Postgres and refresh discovery on failure.
 - Queue-backed A2A dispatch (Redis/Celery) for specialist restart resilience.
-- Expand industry playbooks for uncovered sectors.
+- Add industry profiles for uncovered sectors (13 frameworks today).
 - ~~LangSmith-backed evaluation harness~~ — implemented in `evaluation/run_consistency.py`.
 
 ---

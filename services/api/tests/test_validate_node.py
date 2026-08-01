@@ -43,7 +43,7 @@ class TestConfirmation:
         assert apply("confirm")["checkpoint_1_confirmed"] is True
 
     def test_carries_classification_forward(self):
-        """Sector/industry feed the Planner's playbook selection in M2."""
+        """Sector/industry feed the Planner's industry profile selection."""
         result = apply({"action": "confirm"})
         assert result["sector"] == "Technology"
         assert result["industry"] == "Semiconductors"

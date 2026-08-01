@@ -16,7 +16,7 @@ via an investment committee, and requires human approval."
 ### Slide 2 — Architecture diagram (60 sec)
 Show `ARCHITECTURE.md` §2 diagram. Explain three services:
 - **API (LangGraph)** — orchestrates workflow and HITL
-- **Specialists (A2A)** — 9 research agents over HTTP
+- **Specialists (A2A)** — 10 research agents, 11 capabilities over HTTP
 - **Committee (CrewAI)** — Bull, Bear, CIO debate
 
 Key invariant: control plane *decides*, data plane *retrieves*, committee *argues*.
@@ -32,7 +32,7 @@ We evaluated **Google ADK** and rejected it — specialists are retrieval worklo
 
 ### Slide 4 — Planning paradigm (60 sec)
 "The Planner emits a `ResearchPlan` — a data artifact, not hardcoded steps.
-Industry playbooks change metrics: banks get ROE/NIM; REITs get FFO/NAV.
+Industry profiles change metrics: banks get ROE/NIM; REITs get FFO/NAV.
 Replanning at HITL #2 produces a new revision; Director dispatches only the delta."
 
 ---
@@ -47,7 +47,7 @@ Replanning at HITL #2 produces a new revision; Director dispatches only the delt
 2. Enter ticker **NVDA** → Start research
 3. **HITL #1:** Show company confirmation screen → click **Confirm**
 4. Wait for research (show auto-refresh: evidence count, plan, thesis)
-5. **HITL #2:** Show committee recommendation, bull/bear cases → click **Approve**
+5. **HITL #2:** Show structured report, thesis framework, and recommendation → click **Approve**
 6. Show **Download PDF** / **View HTML report**
 7. Optional: open **http://localhost:8080/docs** → `GET /runs/{id}/plan`, `/safety`, `/thesis`
 
@@ -84,8 +84,8 @@ Pick **one** of these (Failure #1 is easiest):
 
 ## Part 3: Close (≈1 minute)
 
-"Limitations: bounded industry playbooks, no cross-session learning, committee
-is the cost center. Future work: queue-backed dispatch, expanded playbooks.
+"Limitations: bounded industry profiles, no cross-session learning, committee
+is the cost center. Future work: queue-backed dispatch, more industry profiles.
 Questions?"
 
 ---

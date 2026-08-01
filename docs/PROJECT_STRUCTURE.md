@@ -11,7 +11,7 @@ How this repository is organized, where to find things, and why it is split this
 | Run the app | [README.md](../README.md) |
 | List of every agent + code file | [AGENTS.md](AGENTS.md) |
 | System design & frameworks | [ARCHITECTURE.md](../ARCHITECTURE.md) |
-| Course / rubric mapping | [RUBRIC_ALIGNMENT.md](RUBRIC_ALIGNMENT.md) |
+| Guardrails & validation | [GUARDRAILS.md](GUARDRAILS.md) |
 
 ---
 
@@ -64,13 +64,13 @@ finalproject/
 ├── docs/                     Human-readable guides
 │   ├── AGENTS.md             ★ Every agent + file path
 │   ├── PROJECT_STRUCTURE.md  ★ This file
-│   ├── RUBRIC_ALIGNMENT.md
+│   ├── GUARDRAILS.md         Validation & error-handling reference
 │   └── DEMO_SCRIPT.md
 │
 ├── packages/
 │   └── contracts/            ★ Shared Pydantic models (no framework deps)
 │       └── src/contracts/
-│           ├── enums.py          Capabilities, industry playbooks, actions
+│           ├── enums.py          Capabilities, industry classifications, actions
 │           ├── evidence.py       Evidence & claims
 │           ├── plan.py           ResearchPlan & tasks
 │           ├── thesis.py         Thesis & structured framework

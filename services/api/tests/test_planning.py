@@ -1,5 +1,5 @@
 """
-Planner and playbook tests.
+Planner and industry profile tests.
 
 The point of these is the requirement that the system must NOT apply
 identical analysis to every company. That is asserted concretely: a bank and
@@ -48,7 +48,7 @@ class TestClassification:
         assert classify(None, None)[0] == IndustryPlaybook.GENERIC
 
 
-class TestPlaybooksDiffer:
+class TestIndustryProfilesDiffer:
     """The core anti-generic-analysis guarantee."""
 
     def test_bank_and_reit_use_different_valuation_methods(self):
@@ -74,13 +74,13 @@ class TestPlaybooksDiffer:
         tech = get_profile(IndustryPlaybook.TECHNOLOGY)
         assert ValuationMethod.RULE_OF_40 in tech.valuation_methods
 
-    def test_every_playbook_declares_metrics_and_risks(self):
+    def test_every_profile_declares_metrics_and_risks(self):
         for profile_id, profile in PROFILES.items():
             assert profile.required_financial_metrics, f"{profile_id} has no metrics"
             assert profile.business_risks, f"{profile_id} has no key risks"
             assert profile.rationale, f"{profile_id} has no rationale"
 
-    def test_all_playbooks_include_universal_capabilities(self):
+    def test_all_profiles_include_universal_capabilities(self):
         """Every company gets profile, financials, news, and investment drivers."""
         for _profile_id, profile in PROFILES.items():
             assert "company.profile" in profile.required_capabilities
@@ -97,7 +97,7 @@ class TestTaskGraph:
 
     def test_dependencies_are_pruned_to_scheduled_tasks(self):
         """
-        A dependency on a capability this playbook never scheduled would leave
+        A dependency on a capability this profile never scheduled would leave
         the task waiting forever, so unscheduled deps must be dropped.
         """
         generic = get_profile(IndustryPlaybook.GENERIC)

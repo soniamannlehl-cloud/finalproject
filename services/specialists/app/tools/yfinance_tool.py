@@ -120,7 +120,7 @@ def get_company_profile(ticker: str) -> dict:
     Fetch identifying/classification fields for a confirmed ticker.
 
     Deliberately narrow: this returns what the platform needs to classify a
-    company and select an industry playbook, not the full ~150-field blob
+    company and select an industry profile, not the full ~150-field blob
     yfinance exposes.
     """
     try:

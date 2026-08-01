@@ -1,7 +1,7 @@
 # ============================================================================
 # SPECIALISTS SERVICE -- the data plane
 # ============================================================================
-# Owns: the 9 research agents, all external data-provider integrations, and
+# Owns: the 10 research agents, all external data-provider integrations, and
 #       the A2A server that exposes them.
 #
 # DESIGN NOTE: deliberately NO agent framework here. These agents are

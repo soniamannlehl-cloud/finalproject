@@ -182,4 +182,4 @@ Current capabilities:
 ## See also
 
 - [ARCHITECTURE.md](../ARCHITECTURE.md) — full system design
-- [docs/RUBRIC_ALIGNMENT.md](RUBRIC_ALIGNMENT.md) — course requirements mapping
+- [docs/GUARDRAILS.md](GUARDRAILS.md) — guardrails, validation layers, error handling

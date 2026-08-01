@@ -10,7 +10,7 @@ Full topology:
 
     START
       -> validate_company        (HITL #1 interrupt)
-      -> planner                 industry playbook -> task DAG
+      -> planner                 industry profile -> task DAG
       -> director                next execution layer
       -> [specialist_proxy] x N  parallel A2A dispatch via Send
       -> collect                 join barrier

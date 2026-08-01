@@ -1,25 +1,57 @@
-# Architecture Document
+# Investment Research Platform — Architecture Document
 
-**AI Investment Research Analyst** — Capstone submission  
+*Research a public company the way an investment firm would—using a team of AI analysts that work together, verify their findings, and keep you involved in the final decision.*
+
 **Author:** Sonia Mannlehl  
+**Course:** UCLA Extension — Agentic AI & Autonomous Systems (Capstone)  
 **Repository:** https://github.com/soniamannlehl-cloud/finalproject
+
+> ⚠️ **Academic capstone project.** This project was built as part of UCLA Extension's Agentic AI & Autonomous Systems course. It is for educational purposes only and is not investment advice.
+
+---
+
+## Why I Built It
+
+Researching a company before investing isn't simple.
+
+Professional investors don't make decisions based on one financial ratio or one news article. They gather information from many different sources, understand the company's industry, evaluate its financial performance, identify risks, compare competitors, and build an investment thesis before making a recommendation.
+
+I wanted to see if a team of AI agents could work together the same way a professional investment research team does.
+
+Instead of asking one AI assistant to do everything, I built a system where specialized AI agents each have a specific job and collaborate to produce a research report supported by evidence.
+
+---
+
+## What The Platform Does
+
+Enter the name or ticker symbol of a public company. The platform then:
+
+1. **Confirms you selected the correct company** (Checkpoint #1 — before any research spend)
+2. **Creates a research plan** based on the company's industry
+3. **Assigns research tasks** to specialized AI analysts
+4. **Collects information** from financial data, SEC filings, earnings reports, news, and other trusted sources
+5. **Builds an investment thesis** as new evidence is collected
+6. **Holds an AI investment committee discussion** with both bullish and bearish viewpoints
+7. **Generates a complete investment research report**
+8. **Waits for your approval** before finalizing the recommendation (Checkpoint #2)
+
+If there isn't enough evidence, the platform doesn't guess. Instead, it returns **Insufficient Evidence** and tells you that more research is needed.
+
+The sections below describe how this works technically: system design, agent roles, framework choices, data flow, and the design tradeoffs I made along the way.
 
 ---
 
 ## 1. System design
 
-This system simulates a professional investment research desk. A user enters a
-ticker; the platform plans industry-specific research, dispatches specialist
-agents to gather cited evidence, maintains a versioned investment thesis,
-runs safety checks, convenes an adversarial investment committee, generates
-a structured report, and requires human approval before any recommendation
-is finalized.
+At a high level, the **Investment Research Platform** mirrors a research desk workflow. A user enters a ticker; the platform plans industry-specific research, dispatches specialist agents to gather cited evidence, maintains a versioned investment thesis, runs safety checks, convenes an adversarial investment committee, generates a structured report, and requires human approval before any recommendation is finalized.
 
 ### Design commitments
 
-1. **Nothing is asserted without evidence** — claims must cite stored evidence IDs (enforced in Pydantic and SQL).
-2. **The system may refuse to opiniate** — `INSUFFICIENT_EVIDENCE` is a first-class outcome via a deterministic policy gate.
-3. **Humans hold the final gate** — two LangGraph `interrupt()` checkpoints; rejection can trigger replanning.
+These three principles guided every architectural decision:
+
+1. **Nothing is asserted without evidence** — every claim must cite stored evidence IDs (enforced in code and the database).
+2. **The platform may refuse to opiniate** — when evidence is too weak, the answer is *more research needed*, not a confident guess.
+3. **You hold the final gate** — two human checkpoints; you can approve, reject, or request additional analysis before anything is finalized.
 
 ### Runtime topology
 
@@ -123,7 +155,39 @@ sequenceDiagram
     A->>P: Finalize run
 ```
 
-### Figure 3 — LangGraph workflow (ASCII)
+### Figure 3 — Research workflow (ASCII)
+
+This matches the flow described in the README — from ticker entry to your final review:
+
+```
+You enter a company or ticker
+          │
+          ▼
+Confirm the correct company          ◆ Checkpoint #1
+          │
+          ▼
+Create a research plan (industry-specific)
+          │
+          ▼
+Specialized AI analysts research the company  (parallel)
+          │
+          ▼
+Evidence is collected → Investment thesis is built
+          │
+          ▼
+Safety checks → AI Investment Committee (Bull / Bear / CIO)
+          │
+          ▼
+Research report generated
+          │
+          ▼
+You review the final recommendation  ◆ Checkpoint #2
+          │
+          ▼
+Approved investment research report
+```
+
+### Figure 4 — LangGraph workflow (technical detail)
 
 ```
 START → validate → ◆ HITL #1 → planner → director
@@ -146,7 +210,7 @@ This preserves checkpoint compatibility across HITL pauses.
 
 ## 3. Agent roles
 
-The system implements **15+ distinct agent roles** across three layers.
+The platform uses **15+ distinct agent roles** across three layers — a team of specialists, not one general-purpose assistant.
 
 ### Control plane (API service)
 
@@ -289,17 +353,15 @@ The committee **proposes**; the synthesizer and policy gate **dispose**.
 
 # Technical Analysis
 
-This section connects the implementation to course concepts in multi-agent
-systems: planning paradigms, coordination models, and honest limitations.
+This section connects my implementation to course concepts in multi-agent systems: which planning paradigm I used and why, how my coordination model compares to alternatives, and what the platform's limitations are.
 
 ---
 
 ## 7. Planning paradigm: hierarchical decomposition with monitored replanning
 
-### What we use
+### What I chose
 
-The system combines **three planning styles**, each matched to the uncertainty
-of the task:
+The platform combines **three planning styles**, each matched to the uncertainty of the task:
 
 **1. Fixed workflows for specialists (not ReAct loops)**  
 Each specialist follows a predefined code path: call provider → normalize →
@@ -330,19 +392,16 @@ does not patch outputs in place; it revises the plan and re-executes affected ta
 | **LLM-only planning** (no validated DAG) | Cycles and orphan dependencies cause mid-run hangs; we validate the DAG at construction |
 
 Our hybrid — **explicit plan artifact + fixed specialist workflows + capped replan** —
-balances adaptability with auditability, which matters for a system that must
+balances adaptability with auditability. That matters for a platform that must
 explain *why* it researched what it researched.
 
 ---
 
 ## 8. Coordination model: orchestrator–worker with capability routing
 
-### What we use
+### What I chose
 
-The dominant pattern is **hub-and-spoke orchestration**: a LangGraph state
-machine coordinates all stages. The Director is a worker dispatcher, not an
-LLM negotiator. Specialists are workers reached via A2A; the committee is a
-specialized worker for deliberation.
+The dominant pattern is **hub-and-spoke orchestration**: a LangGraph state machine coordinates all stages. The Director dispatches work to specialist analysts via A2A; the committee handles deliberation as a separate step.
 
 ```mermaid
 flowchart LR
@@ -391,7 +450,7 @@ This is a deliberate **workflow-over-agent** choice at the data layer.
 | Limitation | Impact |
 |------------|--------|
 | **Bounded industry profiles** | Companies outside 13 profiles fall back to generic analysis — less precise metrics |
-| **No cross-session learning** | Each run is independent; the system does not improve from past approvals |
+| **No cross-session learning** | Each run is independent; the platform does not improve from past approvals |
 | **Startup-cached A2A discovery** | A specialist deployed mid-run is not discovered until refresh |
 | **Semantic safety is LLM-judged** | Contradiction/hallucination checks inherit model failure modes; deterministic layers are the real floor |
 | **Committee cost** | Three LLM agents dominate per-run token spend despite brief capping |
@@ -399,27 +458,29 @@ This is a deliberate **workflow-over-agent** choice at the data layer.
 | **No per-run budget cap** | Retries and replans are capped, but token/$ spend per run is not hard-limited |
 | **Single-instance architecture** | No queue-backed dispatch; specialist restart mid-run fails tasks into retry path |
 
-### What we would do next
+### What I would do next
 
-- Publish `packages/contracts` as a standalone open-source package (reusable schemas + industry profiles).
-- Add queue-backed A2A dispatch for resilience at scale.
+- Publish `packages/contracts` as a standalone open-source package others can reuse.
+- Add queue-backed agent dispatch for resilience at scale.
 - Expand industry profile coverage and per-run cost controls.
-- Deploy a hosted demo environment for reviewers.
+- Deploy a hosted demo environment so reviewers can access the UI without running Docker locally.
 
 ---
 
 ## 10. Course frameworks summary
 
-| Framework | Requirement | Implementation |
-|-----------|-------------|----------------|
-| LangGraph + HITL | ✅ Required (1 of 5) | 2 interrupts, Postgres checkpointing, `services/api/app/graph/` |
-| A2A Protocol | ✅ Required (1 of 5) | AgentCards, capability routing, `services/specialists/app/a2a/` |
-| CrewAI | ✅ Required (1 of 5) | Bull / Bear / CIO, `services/committee/app/crew/` |
-| Google ADK | ❌ Not used | Evaluated; rejected — see §4 |
-| n8n | ❌ Not used | Not needed — three frameworks already satisfy requirement |
+This capstone required at least **two** of five course frameworks. I used **three**:
 
-**Scope delivered:** 15+ agent roles · explicit `ResearchPlan` · 6+ data sources ·
-2 HITL checkpoints · layered guardrails · Docker Compose deployment ·
+| Framework | Used? | Where in the codebase |
+|-----------|-------|------------------------|
+| LangGraph + HITL | ✅ Yes | 2 human checkpoints, Postgres checkpointing — `services/api/app/graph/` |
+| A2A Protocol | ✅ Yes | AgentCards, capability routing — `services/specialists/app/a2a/` |
+| CrewAI | ✅ Yes | Bull / Bear / CIO debate — `services/committee/app/crew/` |
+| Google ADK | ❌ No | Evaluated; rejected — see §4 |
+| n8n | ❌ No | Not needed — three frameworks already satisfy the requirement |
+
+**Scope delivered:** 15+ agent roles · explicit research plan · 6+ data sources ·
+2 human approval checkpoints · layered guardrails · Docker Compose deployment ·
 automated evaluation harness (`evaluation/run_consistency.py`).
 
 ---

@@ -65,6 +65,10 @@ class ResearchPlan(BaseModel):
     required_metrics: list[str] = Field(
         min_length=1, description="Industry-appropriate metrics, e.g. ['nim','roe'] for banks"
     )
+    industry_profile: dict | None = Field(
+        default=None,
+        description="Full industry profile snapshot selected by the Planner",
+    )
     peer_tickers: list[str] = Field(default_factory=list)
 
     tasks: list[TaskSpec] = Field(min_length=1)

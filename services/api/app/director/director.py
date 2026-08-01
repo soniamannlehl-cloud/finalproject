@@ -124,6 +124,9 @@ async def director_node(state: dict) -> dict:
         "run %s dispatching %d task(s) in parallel: %s",
         state["run_id"], len(pending), [t.capability for t in pending],
     )
+    from ..observability.events import log_event
+    log_event(state["run_id"], "director.dispatch", tasks=len(pending),
+              capabilities=[t.capability for t in pending])
     return {"task_status": gap_updates, "status": "researching"}
 
 
@@ -223,8 +226,20 @@ async def specialist_proxy_node(payload: dict) -> dict:
         }
 
     # Persist to Postgres; state carries only the IDs.
-    evidence_ids = await repository.save_evidence(result.evidence)
-    claim_ids = await repository.save_claims(result.claims)
+    try:
+        evidence_ids = await repository.save_evidence(result.evidence)
+        claim_ids = await repository.save_claims(result.claims)
+    except Exception as e:  # noqa: BLE001
+        log.exception("failed to persist evidence for task %s", task.task_id)
+        return {
+            "task_status": {task.task_id: {**status_entry, "state": TaskState.FAILED.value}},
+            "errors": [{
+                "stage": "specialist",
+                "task_id": task.task_id,
+                "capability": task.capability,
+                "error": f"evidence persistence failed: {e}",
+            }],
+        }
 
     return {
         "evidence_ids": evidence_ids,

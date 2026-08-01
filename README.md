@@ -70,10 +70,11 @@ Add your `OPENAI_API_KEY` to `.env`, then:
 docker compose up --build
 ```
 
-Verify all three services are healthy:
+Verify all services are healthy:
 
 ```bash
 curl http://localhost:8080/health && curl http://localhost:8081/health && curl http://localhost:8082/health
+docker compose ps
 ```
 
 | URL | What it is |
@@ -81,6 +82,7 @@ curl http://localhost:8080/health && curl http://localhost:8081/health && curl h
 | http://localhost:8080/docs | API service — interactive OpenAPI docs |
 | http://localhost:8081/agents | Specialist fleet discovery (A2A) |
 | http://localhost:8082/health | Committee service health |
+| http://localhost:3000 | Web UI — start research and approve recommendations |
 
 ### API keys
 
@@ -96,7 +98,7 @@ and are **disclosed in the report** rather than silently ignored.
 | `FMP_API_KEY` | Optional | Financial statements (falls back to yfinance) |
 | `NEWSAPI_KEY` | Optional | News (falls back to Tavily) |
 | `TAVILY_API_KEY` | Optional | Web search fallback |
-| `POLYGON_API_KEY` | Optional | Market data fallback |
+| `POLYGON_API_KEY` | Optional | Market quotes via Massive (formerly Polygon.io) |
 
 ---
 
@@ -104,16 +106,19 @@ and are **disclosed in the report** rather than silently ignored.
 
 ```
 ├── packages/contracts/     Shared Pydantic schemas — the seam between services.
-│                           Pydantic-only by design; adding a framework here
-│                           would reintroduce the conflict the split prevents.
+│                           Includes industry_profiles/ (Technology, Banking, …).
 ├── services/
 │   ├── api/                LangGraph workflow, HITL, planning, safety, reports
-│   ├── specialists/        Research agents, data-provider tools, A2A server
+│   ├── specialists/        ★ Research agents live in specialists/app/agents/
 │   └── committee/          CrewAI Bull / Bear / CIO
 ├── frontend/               Next.js + React + Tailwind
 ├── ops/db/init/            Postgres schema
-└── docs/                   Diagrams, ADRs, sample reports
+└── docs/                   Guides — start with PROJECT_STRUCTURE.md & AGENTS.md
 ```
+
+**Finding agent code?** Research agents → `services/specialists/app/agents/`. Workflow logic → `services/api/app/graph/`. Committee → `services/committee/app/crew/`.
+
+See **[docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)** for a full folder map and **[docs/AGENTS.md](docs/AGENTS.md)** for every agent and what it does.
 
 ---
 
@@ -123,10 +128,14 @@ Run the contracts test suite (no Docker required):
 
 ```bash
 python -m venv .venv-contracts && .venv-contracts/Scripts/pip install -e packages/contracts pytest
+.venv-contracts/Scripts/python -m pytest packages/contracts/tests -v
 ```
 
+Run the evaluation harness (API must be running):
+
 ```bash
-.venv-contracts/Scripts/python -m pytest packages/contracts/tests -v
+pip install httpx
+python evaluation/run_consistency.py --ticker NVDA --runs 2
 ```
 
 ---
@@ -138,20 +147,45 @@ Built incrementally; each milestone ends compiling, tested, and committed.
 | Milestone | Scope | Status |
 |---|---|---|
 | **M0** | Service skeletons, contracts, Docker, dependency isolation proof | ✅ |
-| M1 | Company validation + HITL #1 + checkpointing | ⬜ |
-| M2 | Planner → Director → one specialist over real A2A (vertical slice) | ⬜ |
-| M3 | Full specialist fleet + parallel fan-out + retry/fallback | ⬜ |
-| M4 | Evidence repository + versioned living thesis | ⬜ |
-| M5 | Safety pipeline + `INSUFFICIENT_EVIDENCE` path | ⬜ |
-| M6 | CrewAI investment committee | ⬜ |
-| M7 | HITL #2 + replan loop | ⬜ |
-| M8 | PDF report generation | ⬜ |
-| M9 | Frontend | ⬜ |
-| M10 | LangSmith cross-service tracing + evaluation harness | ⬜ |
+| M1 | Company validation + HITL #1 + checkpointing | ✅ |
+| M2 | Planner → Director → one specialist over real A2A (vertical slice) | ✅ |
+| M3 | Full specialist fleet + parallel fan-out + retry/fallback | ✅ |
+| M4 | Evidence repository + versioned living thesis | ✅ |
+| M5 | Safety pipeline + `INSUFFICIENT_EVIDENCE` path | ✅ |
+| M6 | CrewAI investment committee | ✅ |
+| M7 | HITL #2 + replan loop | ✅ |
+| M8 | PDF report generation | ✅ |
+| M9 | Frontend | ✅ |
+| M10 | LangSmith cross-service tracing + evaluation harness | ✅ |
 
 ---
 
 ## Documentation
 
+- **[docs/GUARDRAILS.md](docs/GUARDRAILS.md)** — guardrails, validation layers, error handling, multi-agent patterns.
+- **[docs/AGENTS.md](docs/AGENTS.md)** — complete list of agents, capabilities, and code files.
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — system design, framework
   justification, data flow, tradeoffs, and technical analysis.
+- **[docs/RUBRIC_ALIGNMENT.md](docs/RUBRIC_ALIGNMENT.md)** — maps course
+  requirements and 500-point rubric to this repository.
+- **[docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md)** — 10-minute presentation
+  and demo script (includes required failure scenario).
+
+---
+
+## Submission checklist
+
+| Item | Status |
+|---|---|
+| GitHub repository | ✅ |
+| `ARCHITECTURE.md` in repo root | ✅ |
+| `README.md` with setup instructions | ✅ |
+| Demo video (≤10 min) | ⬜ **Record and add link below** |
+| Instructor has repo access | ⬜ Grant collaborator if private |
+
+### Demo Video
+
+<!-- Replace with your Canvas/YouTube/Loom link before submitting -->
+`[Add your demo video link here]`
+
+---

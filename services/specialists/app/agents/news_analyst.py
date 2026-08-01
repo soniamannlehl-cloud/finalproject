@@ -122,7 +122,7 @@ def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidence], flo
     }
 
     evidence = Evidence(
-        evidence_id=Evidence.make_id(AGENT_ID, Capability.NEWS_SENTIMENT, content),
+        evidence_id=Evidence.make_id(AGENT_ID, Capability.NEWS_SENTIMENT, content, run_id),
         run_id=run_id, task_id=task_id, agent_id=AGENT_ID,
         capability=Capability.NEWS_SENTIMENT,
         source_type=SourceType.NEWS,

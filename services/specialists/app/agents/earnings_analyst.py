@@ -120,7 +120,7 @@ def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidence], flo
         degraded = "earnings call transcripts not available from configured sources"
 
     evidence = Evidence(
-        evidence_id=Evidence.make_id(AGENT_ID, Capability.EARNINGS_CALL, content),
+        evidence_id=Evidence.make_id(AGENT_ID, Capability.EARNINGS_CALL, content, run_id),
         run_id=run_id, task_id=task_id, agent_id=AGENT_ID,
         capability=Capability.EARNINGS_CALL,
         source_type=SourceType.ANALYST_ESTIMATE,

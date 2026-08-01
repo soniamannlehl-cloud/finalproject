@@ -1,15 +1,9 @@
 """
 Risk Analysis Agent.
 
-Identifies risks from measurable financial signals rather than from generic
-industry boilerplate. "Elevated leverage: debt/EBITDA of 5.8x" is a finding;
-"the company faces competitive pressures" is filler that would be true of
-every company ever analyzed.
-
-Detection is deterministic and threshold-based, so each flagged risk is
-reproducible and traceable to the number that triggered it. The LLM, when
-available, only writes the narrative around already-detected risks -- it
-cannot invent a risk that no signal supports.
+Identifies risks from measurable financial signals and industry-specific
+threshold rules defined in the selected industry profile. Industry boilerplate
+is context only; flagged risks must trace to a computed metric.
 """
 
 import logging
@@ -18,72 +12,54 @@ from datetime import datetime, timezone
 from contracts import Capability, Claim, Evidence, Polarity, SourceType
 
 from ..config import get_settings
-from ..tools.financial_calculations import compute_all
+from ..tools.financial_calculations import compute_metrics
 from ..tools.yfinance_tool import get_financials
 
 log = logging.getLogger(__name__)
 
 AGENT_ID = "risk_analyst_agent"
 
-# Thresholds chosen to flag genuinely notable conditions rather than fire on
-# every company. Each carries the reason it matters, so the report can
-# explain the flag rather than just asserting it.
-_RISK_RULES = [
+# Universal fallback when no profile rules are supplied
+_DEFAULT_RISK_RULES = [
     {
-        "id": "high_leverage",
-        "metric": "debt_to_ebitda",
-        "test": lambda v: v is not None and v > 4.0,
-        "severity": "high",
-        "title": "Elevated financial leverage",
+        "id": "high_leverage", "metric": "debt_to_ebitda", "operator": "gt",
+        "threshold": 4.0, "severity": "high", "title": "Elevated financial leverage",
         "why": "Debt above 4x EBITDA limits flexibility and raises refinancing sensitivity to rates.",
     },
     {
-        "id": "negative_fcf",
-        "metric": "free_cash_flow",
-        "test": lambda v: v is not None and v < 0,
-        "severity": "high",
-        "title": "Negative free cash flow",
+        "id": "negative_fcf", "metric": "free_cash_flow", "operator": "lt",
+        "threshold": 0, "severity": "high", "title": "Negative free cash flow",
         "why": "The business consumes more cash than it generates, implying reliance on external funding.",
     },
     {
-        "id": "thin_liquidity",
-        "metric": "current_ratio",
-        "test": lambda v: v is not None and v < 1.0,
-        "severity": "medium",
-        "title": "Current liabilities exceed current assets",
+        "id": "thin_liquidity", "metric": "current_ratio", "operator": "lt",
+        "threshold": 1.0, "severity": "medium", "title": "Current liabilities exceed current assets",
         "why": "Short-term obligations are not covered by short-term assets.",
     },
     {
-        "id": "revenue_decline",
-        "metric": "revenue_growth",
-        "test": lambda v: v is not None and v < -0.05,
-        "severity": "medium",
-        "title": "Declining revenue",
+        "id": "revenue_decline", "metric": "revenue_growth", "operator": "lt",
+        "threshold": -0.05, "severity": "medium", "title": "Declining revenue",
         "why": "Revenue contracted year over year, which pressures operating leverage.",
     },
     {
-        "id": "margin_pressure",
-        "metric": "operating_margin",
-        "test": lambda v: v is not None and v < 0,
-        "severity": "high",
-        "title": "Operating losses",
+        "id": "margin_pressure", "metric": "operating_margin", "operator": "lt",
+        "threshold": 0, "severity": "high", "title": "Operating losses",
         "why": "Core operations are unprofitable before financing and tax effects.",
     },
     {
-        "id": "rich_valuation",
-        "metric": "pe_ratio",
-        "test": lambda v: v is not None and v > 50,
-        "severity": "medium",
-        "title": "Demanding valuation multiple",
+        "id": "rich_valuation", "metric": "pe_ratio", "operator": "gt",
+        "threshold": 50, "severity": "medium", "title": "Demanding valuation multiple",
         "why": "A P/E above 50x prices in substantial growth; shortfalls tend to de-rate sharply.",
     },
 ]
 
-_NARRATIVE_PROMPT = """You are a risk analyst. These risks were detected from measured financial data:
+_NARRATIVE_PROMPT = """You are a risk analyst reviewing a {industry_label} company.
 
+These risks were detected from measured financial data:
 {risks}
 
-Industry context: {industry_risks}
+Industry-specific risks to consider as context (do NOT treat as detected unless supported by metrics):
+{industry_risks}
 
 Write 3-4 sentences summarizing this company's risk profile.
 Rules:
@@ -93,7 +69,21 @@ Rules:
 - No investment advice."""
 
 
-def _narrative(detected: list[dict], industry_risks: list[str]) -> str | None:
+def _rule_triggered(value: float | None, operator: str, threshold: float) -> bool:
+    if value is None:
+        return False
+    if operator == "gt":
+        return value > threshold
+    if operator == "gte":
+        return value >= threshold
+    if operator == "lt":
+        return value < threshold
+    if operator == "lte":
+        return value <= threshold
+    return False
+
+
+def _narrative(detected: list[dict], industry_risks: list[str], industry_label: str) -> str | None:
     settings = get_settings()
     if not settings.openai_api_key:
         return None
@@ -115,6 +105,7 @@ def _narrative(detected: list[dict], industry_risks: list[str]) -> str | None:
                 "content": _NARRATIVE_PROMPT.format(
                     risks=risk_text,
                     industry_risks=", ".join(industry_risks) or "none supplied",
+                    industry_label=industry_label,
                 ),
             }],
         )
@@ -129,17 +120,20 @@ def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidence], flo
     if not ticker:
         raise ValueError("risk.analysis requires a 'ticker' input")
 
-    industry_risks = (inputs or {}).get("industry_risks") or []
+    profile = (inputs or {}).get("industry_profile") or {}
+    industry_risks = (inputs or {}).get("industry_risks") or profile.get("business_risks") or []
+    risk_rules = (inputs or {}).get("risk_rules") or profile.get("risk_rules") or _DEFAULT_RISK_RULES
+    metric_names = profile.get("required_financial_metrics")
 
     financials = get_financials(ticker)
-    metrics = compute_all(financials)
+    metrics = compute_metrics(financials, metric_names)
 
     detected = []
-    for rule in _RISK_RULES:
+    for rule in risk_rules:
         metric = metrics.get(rule["metric"], {})
         if not metric.get("meaningful"):
-            continue  # can't flag a risk from a number we don't have
-        if rule["test"](metric.get("value")):
+            continue
+        if _rule_triggered(metric.get("value"), rule.get("operator", "gt"), rule["threshold"]):
             detected.append({
                 "id": rule["id"],
                 "title": rule["title"],
@@ -151,33 +145,33 @@ def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidence], flo
             })
 
     high = sum(1 for r in detected if r["severity"] == "high")
-    narrative = _narrative(detected, industry_risks)
+    industry_label = profile.get("display_name") or "general"
+    narrative = _narrative(detected, industry_risks, industry_label)
 
     content = {
         "ticker": ticker,
+        "profile_id": profile.get("profile_id") or (inputs or {}).get("profile_id"),
         "detected_risks": detected,
         "risk_count": len(detected),
         "high_severity_count": high,
         "industry_risks": industry_risks,
         "narrative": narrative,
         "metrics_evaluated": sum(1 for m in metrics.values() if m["meaningful"]),
-        "detection_method": "deterministic threshold rules over computed financial metrics",
+        "detection_method": "industry profile threshold rules over computed financial metrics",
     }
 
-    # Confidence measures how well we could ASSESS risk, not how risky the
-    # company is: more computable metrics means a more complete assessment.
     evaluable = content["metrics_evaluated"]
     confidence = round(min(0.9, 0.4 + 0.04 * evaluable), 2)
-    degraded = "limited financial data reduced risk-detection coverage" if evaluable < 8 else None
+    degraded = "limited financial data reduced risk-detection coverage" if evaluable < 4 else None
 
     evidence = Evidence(
-        evidence_id=Evidence.make_id(AGENT_ID, Capability.RISK_ANALYSIS, content),
+        evidence_id=Evidence.make_id(AGENT_ID, Capability.RISK_ANALYSIS, content, run_id),
         run_id=run_id, task_id=task_id, agent_id=AGENT_ID,
         capability=Capability.RISK_ANALYSIS,
         source_type=SourceType.COMPUTED,
-        source_name="Threshold-based risk detection",
+        source_name="Industry-aware threshold-based risk detection",
         citation=(
-            f"Risk assessment for {ticker} across {evaluable} computed metric(s); "
+            f"Risk assessment for {ticker} ({industry_label}) across {evaluable} metric(s); "
             f"{len(detected)} risk(s) flagged"
         ),
         content=content,

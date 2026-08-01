@@ -198,6 +198,26 @@ def _from_earnings(ev: dict) -> list[Signal]:
     return signals
 
 
+def _from_investment_drivers(ev: dict) -> list[Signal]:
+    content, eid = ev["content"], ev["evidence_id"]
+    signals: list[Signal] = []
+    for assessment in content.get("kpi_assessments") or []:
+        status = assessment.get("status")
+        if status == "supportive":
+            signals.append(Signal(
+                f"kpi_{assessment.get('kpi', 'unknown')}", Polarity.BULL, 0.55,
+                f"KPI supportive: {assessment.get('detail', assessment.get('kpi'))}",
+                eid, ev["capability"],
+            ))
+        elif status == "challenged":
+            signals.append(Signal(
+                f"kpi_{assessment.get('kpi', 'unknown')}", Polarity.BEAR, 0.55,
+                f"KPI challenged: {assessment.get('detail', assessment.get('kpi'))}",
+                eid, ev["capability"],
+            ))
+    return signals
+
+
 _EXTRACTORS = {
     "financials.ratios": _from_financial_ratios,
     "valuation.estimate": _from_valuation,
@@ -205,6 +225,7 @@ _EXTRACTORS = {
     "risk.analysis": _from_risk,
     "news.sentiment": _from_sentiment,
     "earnings.call": _from_earnings,
+    "investment.drivers": _from_investment_drivers,
 }
 
 

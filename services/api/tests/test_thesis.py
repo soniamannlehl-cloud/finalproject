@@ -11,7 +11,8 @@ what hold that guarantee in place.
 import pytest
 from contracts import Polarity, ThesisVersion
 
-from app.thesis.agent import _change_reason, _deterministic_statement
+from app.thesis.agent import _change_reason
+from app.thesis.framework import build_structured_thesis
 from app.thesis.signals import Signal, _ordinal, compute_stance, extract_signals
 
 
@@ -195,6 +196,19 @@ class TestStanceComputation:
         assert confidence <= 0.95
 
 
+class TestStructuredThesisFallback:
+    """Framework produces a usable primary thesis without an LLM."""
+
+    def test_no_signals_yields_pending_primary_thesis(self):
+        fw = build_structured_thesis(
+            company="Acme",
+            ticker="ACME",
+            evidence_records=[],
+            state={"task_status": {}},
+        )
+        assert "insufficient" in fw.primary_thesis.lower() or "pending" in fw.supporting_drivers[0].lower()
+
+
 class TestChangeReason:
     def _prior(self, stance=Polarity.BULL, confidence=0.8) -> ThesisVersion:
         from datetime import datetime, timezone
@@ -227,23 +241,3 @@ class TestChangeReason:
     def test_negligible_change_reports_reaffirmation(self):
         reason = _change_reason(self._prior(confidence=0.80), Polarity.BULL, 0.805, 7)
         assert "reaffirmed" in reason
-
-
-class TestDeterministicStatement:
-    """The keyless path must still produce a usable thesis."""
-
-    def test_no_signals_states_the_thesis_is_pending(self):
-        text = _deterministic_statement("Acme", Polarity.NEUTRAL, [], version=1)
-        assert "pending" in text.lower()
-
-    def test_includes_supporting_and_offsetting_detail(self):
-        text = _deterministic_statement(
-            "Acme", Polarity.BULL,
-            [signal(Polarity.BULL, 0.9), signal(Polarity.BEAR, 0.4)],
-            version=2,
-        )
-        assert "Supporting:" in text and "Offsetting:" in text
-
-    def test_later_revisions_note_the_revision_number(self):
-        text = _deterministic_statement("Acme", Polarity.BULL, [signal(Polarity.BULL)], version=3)
-        assert "revision 3" in text

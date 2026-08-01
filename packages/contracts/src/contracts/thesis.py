@@ -14,6 +14,26 @@ from pydantic import BaseModel, Field
 from .enums import Polarity
 
 
+class StructuredThesis(BaseModel):
+    """Investment analyst thesis framework (3-5 year ownership view)."""
+
+    core_question: str = Field(
+        description="Should investors own this company over the next 3-5 years?",
+    )
+    primary_thesis: str = Field(description="The one reason to own (or not own) this company")
+    supporting_drivers: list[str] = Field(default_factory=list, max_length=5)
+    key_risks: list[str] = Field(default_factory=list, max_length=5)
+    positive_catalysts: list[str] = Field(default_factory=list)
+    negative_catalysts: list[str] = Field(default_factory=list)
+    valuation_opinion: str = Field(
+        description="cheap | fair | expensive | insufficient_data",
+    )
+    confidence: float = Field(ge=0.0, le=1.0)
+    missing_evidence: list[str] = Field(default_factory=list)
+    recommendation: str = Field(description="buy | hold | sell | insufficient_evidence | pending")
+    horizon: str = "3-5 years"
+
+
 class ThesisVersion(BaseModel):
     """One immutable snapshot of the investment thesis."""
 
@@ -24,6 +44,10 @@ class ThesisVersion(BaseModel):
     run_id: str
 
     statement: str = Field(description="The thesis in plain language")
+    framework: StructuredThesis | None = Field(
+        default=None,
+        description="Structured investment analyst framework when available",
+    )
     stance: Polarity = Field(description="Current directional lean of the evidence")
     confidence: float = Field(ge=0.0, le=1.0)
 

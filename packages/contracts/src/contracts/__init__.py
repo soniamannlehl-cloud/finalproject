@@ -35,7 +35,8 @@ from .policy import (
 from .recommendation import CommitteePosition, Recommendation
 from .report import InvestmentReport, ReportSection
 from .safety import CoverageReport, SafetyFinding, SafetyReport
-from .thesis import ThesisHistory, ThesisVersion
+from .thesis import StructuredThesis, ThesisHistory, ThesisVersion
+from .industry_profiles import IndustryProfile, PROFILES, RiskRuleSpec, classify, get_profile, list_profiles
 
 __version__ = "0.1.0"
 
@@ -83,6 +84,14 @@ __all__ = [
     "SafetyFinding",
     "SafetyReport",
     # thesis
+    "StructuredThesis",
     "ThesisHistory",
     "ThesisVersion",
+    # industry profiles
+    "IndustryProfile",
+    "RiskRuleSpec",
+    "PROFILES",
+    "classify",
+    "get_profile",
+    "list_profiles",
 ]

@@ -1,7 +1,7 @@
 """
 News retrieval with provider failover.
 
-Chain: NewsAPI (if keyed) -> yfinance news (keyless) -> empty.
+Chain: NewsAPI (if keyed) -> Tavily (if keyed) -> yfinance news (keyless) -> empty.
 
 yfinance anchors the chain because it needs no key, so news coverage works
 on a fresh clone with nothing configured. An empty result is a valid
@@ -29,6 +29,35 @@ def _normalize(title, publisher, link, published_at, summary=None) -> dict:
         "published_at": published_at,
         "summary": summary,
     }
+
+
+@retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=0.5, max=3), reraise=False)
+def _tavily_news(query: str) -> list[dict]:
+    settings = get_settings()
+    if not settings.tavily_api_key:
+        return []
+
+    try:
+        resp = httpx.post(
+            "https://api.tavily.com/search",
+            json={
+                "api_key": settings.tavily_api_key,
+                "query": f"{query} stock news",
+                "search_depth": "basic",
+                "max_results": 15,
+            },
+            timeout=settings.provider_timeout_s,
+        )
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+    except Exception as e:  # noqa: BLE001
+        log.warning("Tavily unavailable: %s", e)
+        return []
+
+    return [
+        _normalize(r.get("title"), "Tavily", r.get("url"), None, r.get("content", "")[:300])
+        for r in results if r.get("title")
+    ]
 
 
 @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=0.5, max=3), reraise=False)
@@ -99,6 +128,9 @@ def fetch_news(ticker: str, company_name: str | None = None,
     coverage volume rather than which upstream served it.
     """
     articles = _newsapi_news(company_name or ticker)
+
+    if not articles:
+        articles = _tavily_news(company_name or ticker)
 
     if not articles:
         try:

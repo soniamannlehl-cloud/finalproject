@@ -35,3 +35,6 @@ reports/
 Thumbs.db
 .idea/
 .vscode/
+
+# --- capstone-only (not for public repo) ---
+docs/RUBRIC_ALIGNMENT.md

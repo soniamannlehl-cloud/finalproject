@@ -89,20 +89,26 @@ def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidence], flo
     if not ticker:
         raise ValueError("valuation.estimate requires a 'ticker' input")
 
-    requested = (inputs or {}).get("valuation_methods") or ["pe_multiple", "ev_ebitda"]
+    profile = (inputs or {}).get("industry_profile") or {}
+    requested = (inputs or {}).get("valuation_methods") or [
+        v for v in (profile.get("valuation_methods") or [])
+    ] or ["pe_multiple", "ev_ebitda"]
     industry = (inputs or {}).get("industry")
+    sector = (inputs or {}).get("sector")
 
     financials = get_financials(ticker)
 
-    if not industry:
+    if not industry or not sector:
         try:
             import yfinance as yf
 
-            industry = (yf.Ticker(ticker).info or {}).get("industry")
+            info = yf.Ticker(ticker).info or {}
+            industry = industry or info.get("industry")
+            sector = sector or info.get("sector")
         except Exception:  # noqa: BLE001
-            industry = None
+            pass
 
-    peers = get_industry_peers(industry or "", exclude_ticker=ticker)
+    peers = get_industry_peers(industry or "", exclude_ticker=ticker, sector=sector)
     peer_metrics = get_peer_metrics([p["ticker"] for p in peers]) if peers else {}
 
     results, unsupported = [], []
@@ -140,6 +146,8 @@ def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidence], flo
 
     content = {
         "ticker": ticker,
+        "profile_id": profile.get("profile_id") or (inputs or {}).get("profile_id"),
+        "industry_profile": profile.get("display_name"),
         "industry": industry,
         "requested_methods": requested,
         "results": results,
@@ -159,7 +167,7 @@ def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidence], flo
         )
 
     evidence = Evidence(
-        evidence_id=Evidence.make_id(AGENT_ID, Capability.VALUATION, content),
+        evidence_id=Evidence.make_id(AGENT_ID, Capability.VALUATION, content, run_id),
         run_id=run_id, task_id=task_id, agent_id=AGENT_ID,
         capability=Capability.VALUATION,
         source_type=SourceType.COMPUTED,

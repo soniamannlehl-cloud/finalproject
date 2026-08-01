@@ -89,7 +89,7 @@ def _classify_no_match(query: str) -> tuple[ValidationStatus, str]:
 def _build_evidence(run_id: str, task_id: str, content: dict, confidence: float) -> Evidence:
     """Validation output is evidence like anything else -- attributable and timestamped."""
     return Evidence(
-        evidence_id=Evidence.make_id(AGENT_ID, Capability.COMPANY_VALIDATE, content),
+        evidence_id=Evidence.make_id(AGENT_ID, Capability.COMPANY_VALIDATE, content, run_id),
         run_id=run_id,
         task_id=task_id,
         agent_id=AGENT_ID,

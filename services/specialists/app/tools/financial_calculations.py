@@ -201,37 +201,95 @@ def net_interest_margin(net_interest_income: float | None, earning_assets: float
     )
 
 
-def compute_all(financials: dict) -> dict[str, dict]:
-    """
-    Compute the standard metric set from a normalized financials dict.
+def _stub(name: str, reason: str = "requires supplemental industry data not in standard statements") -> Metric:
+    return _na(name, reason)
 
-    Missing inputs yield a flagged Metric rather than an omission, so the
-    downstream interpreter can distinguish "we looked and it was negative"
-    from "we never had the data".
-    """
-    f = financials
+
+def _compute_single(name: str, f: dict) -> Metric:
+    """Dispatch one metric name against normalized financials."""
     revenue = f.get("revenue")
-
+    price = f.get("price")
     fcf = free_cash_flow(f.get("operating_cash_flow"), f.get("capex"))
     growth = revenue_growth(revenue, f.get("revenue_prior"))
     fcf_m = fcf_margin(fcf.value, revenue)
 
-    metrics = [
-        pe_ratio(f.get("price"), f.get("eps")),
-        price_to_book(f.get("price"), f.get("book_value_per_share")),
-        ev_to_revenue(f.get("enterprise_value"), revenue),
-        ev_to_ebitda(f.get("enterprise_value"), f.get("ebitda")),
-        gross_margin(f.get("gross_profit"), revenue),
-        operating_margin(f.get("operating_income"), revenue),
-        net_margin(f.get("net_income"), revenue),
-        return_on_equity(f.get("net_income"), f.get("total_equity")),
-        return_on_assets(f.get("net_income"), f.get("total_assets")),
-        growth,
-        debt_to_equity(f.get("total_debt"), f.get("total_equity")),
-        debt_to_ebitda(f.get("total_debt"), f.get("ebitda")),
-        current_ratio(f.get("current_assets"), f.get("current_liabilities")),
-        fcf,
-        fcf_m,
-        rule_of_40(growth.value, fcf_m.value),
+    _DISPATCH: dict[str, Metric] = {
+        "pe_ratio": pe_ratio(price, f.get("eps")),
+        "price_to_book": price_to_book(price, f.get("book_value_per_share")),
+        "ev_to_revenue": ev_to_revenue(f.get("enterprise_value"), revenue),
+        "ev_to_ebitda": ev_to_ebitda(f.get("enterprise_value"), f.get("ebitda")),
+        "gross_margin": gross_margin(f.get("gross_profit"), revenue),
+        "operating_margin": operating_margin(f.get("operating_income"), revenue),
+        "net_margin": net_margin(f.get("net_income"), revenue),
+        "return_on_equity": return_on_equity(f.get("net_income"), f.get("total_equity")),
+        "return_on_assets": return_on_assets(f.get("net_income"), f.get("total_assets")),
+        "revenue_growth": growth,
+        "debt_to_equity": debt_to_equity(f.get("total_debt"), f.get("total_equity")),
+        "debt_to_ebitda": debt_to_ebitda(f.get("total_debt"), f.get("ebitda")),
+        "current_ratio": current_ratio(f.get("current_assets"), f.get("current_liabilities")),
+        "free_cash_flow": fcf,
+        "fcf_margin": fcf_m,
+        "rule_of_40": rule_of_40(growth.value, fcf_m.value),
+        "net_interest_margin": net_interest_margin(
+            f.get("net_interest_income"), f.get("total_assets"),
+        ),
+        "dividend_yield": _stub(
+            "dividend_yield",
+            "dividend yield requires dividend history not in standard statement pull",
+        ) if f.get("dividend_yield") is None else Metric(
+            "dividend_yield", f["dividend_yield"], _pct(f["dividend_yield"]),
+        ),
+        "payout_ratio": _stub("payout_ratio"),
+        "rd_to_revenue": _stub("rd_to_revenue"),
+        "efficiency_ratio": _stub("efficiency_ratio"),
+        "tier_1_capital_ratio": _stub("tier_1_capital_ratio"),
+        "combined_ratio": _stub("combined_ratio"),
+        "investment_yield": _stub("investment_yield"),
+        "loss_ratio": _stub("loss_ratio"),
+        "expense_ratio": _stub("expense_ratio"),
+        "cash_runway_months": _stub("cash_runway_months"),
+        "production_growth": _stub("production_growth"),
+        "reserve_life": _stub("reserve_life"),
+        "same_store_sales_growth": _stub("same_store_sales_growth"),
+        "inventory_turnover": _stub("inventory_turnover"),
+        "return_on_invested_capital": _stub("return_on_invested_capital"),
+        "asset_turnover": _stub("asset_turnover"),
+        "backlog_growth": _stub("backlog_growth"),
+        "ffo_per_share": _stub("ffo_per_share"),
+        "affo_per_share": _stub("affo_per_share"),
+        "net_asset_value": _stub("net_asset_value"),
+        "occupancy_rate": _stub("occupancy_rate"),
+        "rate_base_growth": _stub("rate_base_growth"),
+    }
+    if name in _DISPATCH:
+        return _DISPATCH[name]
+    return _stub(name, f"metric '{name}' is not registered in the calculation engine")
+
+
+def compute_metrics(financials: dict, metric_names: list[str] | None = None) -> dict[str, dict]:
+    """
+    Compute only the metrics requested by the industry profile.
+
+    Unknown or industry-specific metrics return a flagged stub rather than
+    being silently omitted, so the report can declare the data gap.
+    """
+    names = metric_names or [
+        "pe_ratio", "price_to_book", "ev_to_revenue", "ev_to_ebitda",
+        "gross_margin", "operating_margin", "net_margin",
+        "return_on_equity", "return_on_assets", "revenue_growth",
+        "debt_to_equity", "debt_to_ebitda", "current_ratio",
+        "free_cash_flow", "fcf_margin", "rule_of_40",
     ]
-    return {m.name: m.to_dict() for m in metrics}
+    seen: set[str] = set()
+    metrics: dict[str, dict] = {}
+    for name in names:
+        if name in seen:
+            continue
+        seen.add(name)
+        metrics[name] = _compute_single(name, financials).to_dict()
+    return metrics
+
+
+def compute_all(financials: dict) -> dict[str, dict]:
+    """Compute the standard universal metric set (legacy fallback)."""
+    return compute_metrics(financials, None)

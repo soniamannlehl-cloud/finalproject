@@ -93,14 +93,16 @@ def make_safety(*, coverage=1.0, evidence_score=None, unsupported=None,
 
 class TestEvidence:
     def test_ids_are_content_addressed(self):
-        """Identical content must dedupe across retries."""
-        a = Evidence.make_id("agent", "cap", {"pe": 24.3})
-        b = Evidence.make_id("agent", "cap", {"pe": 24.3})
+        """Identical content must dedupe across retries within the same run."""
+        a = Evidence.make_id("agent", "cap", {"pe": 24.3}, "run_1")
+        b = Evidence.make_id("agent", "cap", {"pe": 24.3}, "run_1")
         assert a == b
+        assert Evidence.make_id("agent", "cap", {"pe": 24.3}, "run_1") != \
+               Evidence.make_id("agent", "cap", {"pe": 24.3}, "run_2")
 
     def test_different_content_yields_different_ids(self):
-        assert Evidence.make_id("agent", "cap", {"pe": 24.3}) != \
-               Evidence.make_id("agent", "cap", {"pe": 25.0})
+        assert Evidence.make_id("agent", "cap", {"pe": 24.3}, "run_1") != \
+               Evidence.make_id("agent", "cap", {"pe": 25.0}, "run_1")
 
     def test_naive_datetime_rejected(self):
         """Naive datetimes silently corrupt freshness math across services."""

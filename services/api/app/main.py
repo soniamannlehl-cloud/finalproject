@@ -10,15 +10,20 @@ through A2A.
 import logging
 from contextlib import asynccontextmanager
 
+# Tracing MUST be configured before LangGraph modules are imported.
+from .config import get_settings
+from .observability.langsmith import configure_langsmith
+
+logging.basicConfig(level=get_settings().log_level)
+configure_langsmith()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api.routes import router as runs_router
-from .config import get_settings
 from .db import checkpointer as db
 from .director.a2a_client import get_a2a_client
 
-logging.basicConfig(level=get_settings().log_level)
 log = logging.getLogger(__name__)
 
 

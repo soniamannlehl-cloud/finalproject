@@ -8,10 +8,13 @@ a client must be able to render the pending decision without holding any
 server-side session.
 """
 
+import asyncio
+import json
 import logging
 import uuid
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
@@ -19,7 +22,10 @@ from ..db import checkpointer as db
 from ..evidence import repository as evidence_repo
 from ..graph.builder import compile_graph
 from ..graph.state import initial_state
+from ..report import repository as report_repo
+from ..report.renderer import render_html, render_pdf
 from ..thesis import repository as thesis_repo
+from ..thesis.framework import build_structured_thesis
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -69,8 +75,23 @@ def _public_state(state: dict) -> dict:
         "validation_status": state.get("validation_status"),
         "message": state.get("validation_message"),
         "evidence_count": len(state.get("evidence_ids", [])),
+        "recommendation": state.get("recommendation"),
+        "evidence_score": state.get("evidence_score"),
+        "report_id": state.get("report_id"),
+        "classification": state.get("classification"),
+        "plan_revision": state.get("plan_revision", 0),
+        "committee_decision": state.get("committee_decision"),
         "errors": state.get("errors", []),
     }
+
+
+async def _graph_state(run_id: str) -> dict:
+    run = await db.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"run {run_id} not found")
+    app_graph = compile_graph(db.get_checkpointer())
+    snapshot = await app_graph.aget_state({"configurable": {"thread_id": run["thread_id"]}})
+    return snapshot.values or {}
 
 
 @router.post("", status_code=201)
@@ -297,16 +318,39 @@ async def get_run_thesis(run_id: str) -> dict:
     platform's claim is that the thesis EVOLVES as evidence arrives -- and
     that is only demonstrable by showing the trajectory.
     """
-    if await db.get_run(run_id) is None:
+    run = await db.get_run(run_id)
+    if run is None:
         raise HTTPException(status_code=404, detail=f"run {run_id} not found")
 
     history = await thesis_repo.get_history(run_id)
     current = history.current
 
+    framework = None
+    if current and current.framework:
+        framework = current.framework.model_dump(mode="json")
+    elif current:
+        app_graph = compile_graph(db.get_checkpointer())
+        snapshot = await app_graph.aget_state({"configurable": {"thread_id": run["thread_id"]}})
+        state = snapshot.values or {}
+        evidence_records = await evidence_repo.get_evidence_for_run(run_id)
+        built = build_structured_thesis(
+            company=state.get("company_name") or state.get("ticker") or "",
+            ticker=state.get("ticker") or "",
+            evidence_records=evidence_records,
+            state=state,
+            recommendation=state.get("recommendation"),
+            safety_report=state.get("safety_report"),
+        )
+        framework = built.model_dump(mode="json")
+        current = current.model_copy(update={"framework": built})
+
+    current_payload = current.model_dump(mode="json") if current else None
+
     return {
         "run_id": run_id,
         "version_count": len(history.versions),
-        "current": current.model_dump(mode="json") if current else None,
+        "framework": framework,
+        "current": current_payload,
         "confidence_trajectory": history.confidence_trajectory(),
         "history": [
             {
@@ -324,3 +368,123 @@ async def get_run_thesis(run_id: str) -> dict:
             for v in history.versions
         ],
     }
+
+
+@router.get("/{run_id}/recommendation")
+async def get_run_recommendation(run_id: str) -> dict:
+    """The gated investment recommendation, if the committee has deliberated."""
+    run = await db.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"run {run_id} not found")
+
+    app_graph = compile_graph(db.get_checkpointer())
+    snapshot = await app_graph.aget_state({"configurable": {"thread_id": run["thread_id"]}})
+    values = snapshot.values or {}
+    recommendation = values.get("recommendation")
+
+    if recommendation is None:
+        return {
+            "run_id": run_id,
+            "status": "recommendation not yet available",
+            "recommendation": None,
+        }
+
+    return {
+        "run_id": run_id,
+        "recommendation": recommendation,
+        "committee_decision": values.get("committee_decision"),
+    }
+
+
+@router.get("/{run_id}/plan")
+async def get_run_plan(run_id: str) -> dict:
+    """The research plan — capabilities, dependencies, and industry framework."""
+    state = await _graph_state(run_id)
+    plan = state.get("plan")
+    if plan is None:
+        return {"run_id": run_id, "status": "plan not yet available", "plan": None}
+    return {
+        "run_id": run_id,
+        "classification": state.get("classification"),
+        "plan_revision": state.get("plan_revision", 0),
+        "task_status": state.get("task_status", {}),
+        "plan": plan,
+    }
+
+
+@router.get("/{run_id}/claims")
+async def get_run_claims(run_id: str) -> dict:
+    """All interpretive claims with their evidence citations."""
+    if await db.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail=f"run {run_id} not found")
+    claims = await evidence_repo.get_claims_for_run(run_id)
+    return {"run_id": run_id, "count": len(claims), "claims": claims}
+
+
+@router.get("/{run_id}/report")
+async def get_run_report(run_id: str) -> dict:
+    """The final InvestmentReport as JSON."""
+    if await db.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail=f"run {run_id} not found")
+    report = await report_repo.get_report(run_id)
+    if report is None:
+        return {"run_id": run_id, "status": "report not yet generated", "report": None}
+    return {"run_id": run_id, "report": report.model_dump(mode="json")}
+
+
+@router.get("/{run_id}/report/html", response_class=HTMLResponse)
+async def get_run_report_html(run_id: str) -> HTMLResponse:
+    """HTML preview of the investment report."""
+    report = await report_repo.get_report(run_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="report not yet generated")
+    return HTMLResponse(content=render_html(report))
+
+
+@router.get("/{run_id}/report/pdf")
+async def get_run_report_pdf(run_id: str) -> Response:
+    """Download the investment report as PDF."""
+    report = await report_repo.get_report(run_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="report not yet generated")
+    try:
+        pdf_bytes = render_pdf(report)
+    except ImportError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    filename = f"{report.ticker}_research_report.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{run_id}/events")
+async def stream_run_events(run_id: str) -> StreamingResponse:
+    """SSE stream of run status updates for live UI progress."""
+
+    async def event_generator():
+        last_status = None
+        for _ in range(120):
+            run = await db.get_run(run_id)
+            if run is None:
+                yield f"data: {json.dumps({'error': 'not found'})}\n\n"
+                break
+            app_graph = compile_graph(db.get_checkpointer())
+            snapshot = await app_graph.aget_state({"configurable": {"thread_id": run["thread_id"]}})
+            values = snapshot.values or {}
+            payload = {
+                "status": run["status"],
+                "awaiting_human": bool(snapshot.next),
+                "evidence_count": len(values.get("evidence_ids", [])),
+                "state_status": values.get("status"),
+            }
+            if payload != last_status:
+                yield f"data: {json.dumps(payload)}\n\n"
+                last_status = payload
+            if run.get("completed_at") or (not snapshot.next and run["status"] in ("complete", "rejected", "approved")):
+                yield f"data: {json.dumps({'done': True, **payload})}\n\n"
+                break
+            await asyncio.sleep(2)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

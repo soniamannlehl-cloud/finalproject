@@ -73,16 +73,16 @@ class Evidence(BaseModel):
         return v
 
     @staticmethod
-    def make_id(agent_id: str, capability: str, content: dict) -> str:
+    def make_id(agent_id: str, capability: str, content: dict, run_id: str) -> str:
         """
-        Deterministic content-addressed ID.
+        Deterministic content-addressed ID scoped to a run.
 
-        Identical content from the same agent+capability yields the same ID,
-        which gives us free deduplication when a retry re-fetches unchanged
-        data, and makes cached runs reproducible.
+        Identical content from the same agent+capability within one run yields
+        the same ID, which deduplicates retries. Including run_id prevents
+        cross-run collisions in the evidence table (same ticker researched twice).
         """
         payload = json.dumps(
-            {"agent": agent_id, "cap": capability, "content": content},
+            {"agent": agent_id, "cap": capability, "run_id": run_id, "content": content},
             sort_keys=True,
             default=str,
         )

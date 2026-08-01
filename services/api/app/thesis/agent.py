@@ -2,15 +2,9 @@
 Investment Thesis Agent.
 
 Runs after every execution layer rather than once at the end, so the thesis
-genuinely evolves as evidence arrives: a three-layer plan produces three
-revisions, each recording what changed and why. A thesis assembled in a
-single pass at the end would satisfy the letter of "living thesis" and none
-of its substance.
-
-The stance is computed deterministically from measured signals first (see
-signals.py); the LLM only writes prose around a conclusion already reached.
-Without an API key the thesis still forms -- the statement is assembled from
-the signals themselves.
+genuinely evolves as evidence arrives. Stance and confidence are computed
+deterministically from signals (see signals.py); the structured framework
+(see framework.py) organizes findings into the analyst template.
 """
 
 import logging
@@ -18,113 +12,12 @@ from datetime import datetime, timezone
 
 from contracts import Polarity, ThesisVersion
 
-from ..config import get_settings
 from ..evidence import repository as evidence_repo
 from . import repository as thesis_repo
-from .signals import Signal, compute_stance, extract_signals
+from .framework import build_structured_thesis, framework_to_statement
+from .signals import compute_stance, extract_signals
 
 log = logging.getLogger(__name__)
-
-_STANCE_WORDS = {
-    Polarity.BULL: "constructive",
-    Polarity.BEAR: "cautious",
-    Polarity.NEUTRAL: "balanced",
-}
-
-_NARRATIVE_PROMPT = """You are a senior research analyst maintaining an evolving investment thesis.
-
-Company: {company}
-Stance derived from measured evidence: {stance} (confidence {confidence})
-
-Supporting signals:
-{bull}
-
-Opposing signals:
-{bear}
-
-{prior}
-
-Write the thesis in 3-4 sentences. Rules:
-- The stance above was computed from the data; do NOT contradict or re-derive it.
-- Reference only the signals listed. Introduce no new facts or figures.
-- If prior thesis text is shown, write this as an UPDATE: say what changed and why.
-- No buy/sell/hold advice."""
-
-
-def _deterministic_statement(
-    company: str, stance: Polarity, signals: list[Signal], version: int
-) -> str:
-    """
-    Thesis text assembled from the signals themselves.
-
-    Used when no LLM is configured. Deliberately plain -- it reads as a
-    summary of findings rather than imitating analyst prose it cannot
-    actually produce.
-    """
-    bull = [s for s in signals if s.polarity == Polarity.BULL]
-    bear = [s for s in signals if s.polarity == Polarity.BEAR]
-
-    if not signals:
-        return (
-            f"No directional signals have been derived for {company} yet; "
-            "the thesis is pending further evidence."
-        )
-
-    parts = [f"Evidence gathered so far supports a {_STANCE_WORDS[stance]} view on {company}."]
-    if bull:
-        top = sorted(bull, key=lambda s: -s.strength)[:3]
-        parts.append("Supporting: " + "; ".join(s.detail for s in top) + ".")
-    if bear:
-        top = sorted(bear, key=lambda s: -s.strength)[:3]
-        parts.append("Offsetting: " + "; ".join(s.detail for s in top) + ".")
-    if version > 1:
-        parts.append(f"This is revision {version}, incorporating evidence from the latest research stage.")
-
-    return " ".join(parts)
-
-
-def _llm_statement(
-    company: str, stance: Polarity, confidence: float,
-    signals: list[Signal], prior: ThesisVersion | None,
-) -> str | None:
-    settings = get_settings()
-    if not settings.openai_api_key:
-        return None
-
-    bull = [s for s in signals if s.polarity == Polarity.BULL]
-    bear = [s for s in signals if s.polarity == Polarity.BEAR]
-
-    prior_block = ""
-    if prior:
-        prior_block = (
-            f"Prior thesis (v{prior.version}, stance {prior.stance.value}, "
-            f"confidence {prior.confidence}):\n{prior.statement}"
-        )
-
-    try:
-        from openai import OpenAI
-
-        client = OpenAI(api_key=settings.openai_api_key)
-        response = client.chat.completions.create(
-            model=settings.resolve_model("thesis"),
-            temperature=settings.temperature,
-            max_tokens=400,
-            messages=[{
-                "role": "user",
-                "content": _NARRATIVE_PROMPT.format(
-                    company=company,
-                    stance=_STANCE_WORDS[stance],
-                    confidence=confidence,
-                    bull="\n".join(f"- {s.detail}" for s in bull) or "- none",
-                    bear="\n".join(f"- {s.detail}" for s in bear) or "- none",
-                    prior=prior_block,
-                ),
-            }],
-        )
-        return (response.choices[0].message.content or "").strip() or None
-    except Exception as e:  # noqa: BLE001
-        log.warning("thesis narrative unavailable, using deterministic text: %s", e)
-        return None
 
 
 def _change_reason(
@@ -145,9 +38,6 @@ def _change_reason(
             f"arrived ({new_signal_count} signal(s) now considered)."
         )
 
-    # Threshold set just above float-rounding noise. A wider band previously
-    # reported a real 0.92 -> 0.87 move as "stable", which understated a
-    # genuine weakening the evidence had caused.
     delta = round(confidence - prior.confidence, 2)
     if delta >= 0.02:
         return (
@@ -181,13 +71,17 @@ async def thesis_node(state: dict) -> dict:
         prior = await thesis_repo.get_latest_version(run_id)
         version = (prior.version + 1) if prior else 1
 
-        statement = (
-            _llm_statement(company, stance, confidence, signals, prior)
-            or _deterministic_statement(company, stance, signals, version)
+        framework = build_structured_thesis(
+            company=company,
+            ticker=state.get("ticker") or "",
+            evidence_records=evidence_records,
+            state=state,
+            recommendation=state.get("recommendation"),
+            safety_report=state.get("safety_report"),
         )
 
-        # Which research stage prompted this revision -- the audit trail for
-        # "what caused the thesis to move".
+        statement = framework_to_statement(framework)
+
         latest_capabilities = sorted({
             info.get("capability") for info in (state.get("task_status") or {}).values()
             if info.get("capability")
@@ -198,6 +92,7 @@ async def thesis_node(state: dict) -> dict:
             parent_version=prior.version if prior else None,
             run_id=run_id,
             statement=statement,
+            framework=framework,
             stance=stance,
             confidence=confidence,
             supporting_claim_ids=[s.evidence_id for s in signals if s.polarity == Polarity.BULL],
@@ -220,6 +115,7 @@ async def thesis_node(state: dict) -> dict:
             "thesis_version": version,
             "thesis_stance": stance.value,
             "thesis_confidence": confidence,
+            "thesis_framework": framework.model_dump(mode="json"),
         }
 
     except Exception as e:  # noqa: BLE001

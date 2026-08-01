@@ -29,8 +29,8 @@ class Settings(BaseSettings):
     # capable model: a weak Bear Analyst produces a strawman, which makes the
     # CIO's synthesis worthless.
     openai_api_key: str = ""
-    model_bull: str = "gpt-4o"
-    model_bear: str = "gpt-4o"
+    model_bull: str = "gpt-4o-mini"
+    model_bear: str = "gpt-4o-mini"
     model_cio: str = "gpt-4o"
     temperature: float = 0.2  # slight variation so Bull/Bear don't converge
 

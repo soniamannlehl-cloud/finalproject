@@ -6,7 +6,24 @@ traded company.
 
 ---
 
-## 1. Overview
+## 0. Course requirements mapping
+
+This project satisfies the capstone **mandatory framework** rule (≥2 of 5):
+
+| Course framework | Status | Implementation |
+|---|---|---|
+| CrewAI | ✅ | `services/committee/` — Bull / Bear / CIO |
+| Google ADK | ❌ Evaluated, not used | Justified in §3 — specialists are retrieval workloads |
+| n8n | ❌ Not used | Not required — three other frameworks used |
+| A2A Protocol | ✅ | `services/specialists/app/a2a/` — AgentCards, task dispatch |
+| LangGraph + HITL | ✅ | `services/api/app/graph/` — 2 `interrupt()` checkpoints |
+
+**Minimum technical scope:** multi-agent (15+ roles), explicit planning (`ResearchPlan`),
+6+ external data sources, 2 HITL checkpoints, LangSmith tracing, graceful degradation.
+
+Full rubric mapping: [`docs/RUBRIC_ALIGNMENT.md`](docs/RUBRIC_ALIGNMENT.md).
+
+---
 
 The system takes a ticker or company name and produces a cited investment
 report gated behind human approval. Between those two points it plans a
@@ -186,17 +203,17 @@ START
   ├─► [specialist_proxy] ─┤   (one node type, N invocations)
   └─► [specialist_proxy] ─┘
                           ▼   LangGraph joins the branches
-                   [evidence_gate]  ── deterministic
-                    │ ├─ retriable failures ──► [director] (retry subset)
-                    │ ├─ coverage < floor ────► degraded-mode flag
-                    │ └─ ok
-                    ▼
-               [thesis_agent] ──► ThesisVersion(n)
+                   [collect]  ── join barrier after parallel batch
                     │
                     ▼
-               [safety_pipeline]  L0 schema → L1 deterministic → L2 semantic
-                    │ ├─ blocking ──► [director] (targeted re-research, capped)
-                    │ └─ pass / warn
+               [thesis_agent] ──► ThesisVersion(n)   (after each batch)
+                    │
+          (loop while plan layers remain)
+                    │
+                    ▼
+               [safety_pipeline]  L1 deterministic → L2 semantic
+                    │ ├─ pipeline crash ──► END (failed closed)
+                    │ └─ pass / warn / block
                     ▼
                [committee] ──► A2A → CrewAI (Bull · Bear · CIO)
                     │
@@ -205,8 +222,7 @@ START
                     │
                     ▼
                ◆ HITL #2 — interrupt(): approve │ reject │ request analysis
-                    │ ├─ approve ──────────────► [report_generator] ──► END
-                    │ ├─ reject ───────────────► END (archived, no report)
+                    │ ├─ approve / reject ─────► [report_generator] ──► END
                     │ └─ request more ─────────► [planner.replan(feedback)]
                     │                                   │
                     └───────────────────────────────────┘
@@ -545,14 +561,10 @@ overkill for a small fixed set of safety-relevant formulas).
 
 ### Next steps
 
-- Persist AgentCards in Postgres and refresh discovery on failure, so fleet
-  changes are picked up without an API restart.
-- Add a LangSmith-backed evaluation harness measuring recommendation
-  consistency across repeated runs on the same ticker.
-- Introduce a queue (Redis/Celery) behind A2A dispatch so specialist
-  restarts don't fail in-flight tasks.
-- Expand industry playbooks, or have the Planner propose a candidate metric
-  set for uncovered industries subject to human review.
+- Persist AgentCards in Postgres and refresh discovery on failure.
+- Queue-backed A2A dispatch (Redis/Celery) for specialist restart resilience.
+- Expand industry playbooks for uncovered sectors.
+- ~~LangSmith-backed evaluation harness~~ — implemented in `evaluation/run_consistency.py`.
 
 ---
 
@@ -561,16 +573,16 @@ overkill for a small fixed set of safety-relevant formulas).
 | # | Scope | Status |
 |---|---|---|
 | **M0** | Service skeletons · contracts · Docker · isolation experiment | ✅ |
-| M1 | Company validation + HITL #1 + Postgres checkpointing | ⬜ |
-| M2 | Planner → Director → one specialist over real A2A *(vertical slice)* | ⬜ |
-| M3 | Full specialist fleet + `Send` fan-out + retry/fallback | ⬜ |
-| M4 | Evidence repository + versioned living thesis | ⬜ |
-| M5 | Safety pipeline + `INSUFFICIENT_EVIDENCE` path | ⬜ |
-| M6 | CrewAI investment committee over A2A | ⬜ |
-| M7 | HITL #2 + replan loop (delta re-dispatch) | ⬜ |
-| M8 | PDF report generation | ⬜ |
-| M9 | Frontend | ⬜ |
-| M10 | Cross-service LangSmith stitching + evaluation harness | ⬜ |
+| M1 | Company validation + HITL #1 + Postgres checkpointing | ✅ |
+| M2 | Planner → Director → one specialist over real A2A *(vertical slice)* | ✅ |
+| M3 | Full specialist fleet + `Send` fan-out + retry/fallback | ✅ |
+| M4 | Evidence repository + versioned living thesis | ✅ |
+| M5 | Safety pipeline + `INSUFFICIENT_EVIDENCE` path | ✅ |
+| M6 | CrewAI investment committee over A2A | ✅ |
+| M7 | HITL #2 + replan loop (delta re-dispatch) | ✅ |
+| M8 | PDF report generation | ✅ |
+| M9 | Frontend (Next.js) | ✅ |
+| M10 | LangSmith tracing + evaluation harness | ✅ |
 
 **M2 is the critical milestone.** It proves A2A-across-containers works with
 LangGraph checkpointing — the riskiest seam in the design, deliberately

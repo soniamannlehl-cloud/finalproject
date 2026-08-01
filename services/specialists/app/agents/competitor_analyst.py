@@ -27,6 +27,34 @@ _COMPARED_METRICS = (
     "gross_margin", "operating_margin", "revenue_growth", "return_on_equity",
 )
 
+_FACTOR_TO_METRIC: dict[str, str] = {
+    "revenue_growth": "revenue_growth",
+    "gross_margin": "gross_margin",
+    "operating_margin": "operating_margin",
+    "ev_to_revenue": "ev_to_revenue",
+    "ev_to_ebitda": "ev_to_ebitda",
+    "price_to_book": "price_to_book",
+    "return_on_equity": "return_on_equity",
+    "rd_to_revenue": "rd_to_revenue",
+    "efficiency_ratio": "efficiency_ratio",
+    "dividend_yield": "dividend_yield",
+    "payout_ratio": "payout_ratio",
+    "ffo_multiple": "ev_to_ebitda",
+    "occupancy_rate": "operating_margin",
+}
+
+
+def _metrics_from_profile(competitive_factors: list[str] | None) -> tuple[str, ...]:
+    """Derive peer comparison metrics from industry profile competitive factors."""
+    if not competitive_factors:
+        return _COMPARED_METRICS
+    selected: list[str] = []
+    for factor in competitive_factors:
+        for key, metric in _FACTOR_TO_METRIC.items():
+            if key in factor.lower() and metric not in selected:
+                selected.append(metric)
+    return tuple(selected) if selected else _COMPARED_METRICS
+
 
 def _percentile_rank(value: float | None, peer_values: list[float | None]) -> float | None:
     """Fraction of peers this value exceeds. None when uncomparable."""
@@ -41,20 +69,25 @@ def _percentile_rank(value: float | None, peer_values: list[float | None]) -> fl
 def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidence], float, str | None, list]:
     ticker = (inputs or {}).get("ticker")
     industry = (inputs or {}).get("industry")
+    sector = (inputs or {}).get("sector")
     if not ticker:
         raise ValueError("competitors.analysis requires a 'ticker' input")
 
-    # Industry may not be in the task inputs; fall back to the company's own
-    # classification so this agent stays usable when called standalone.
-    if not industry:
+    profile = (inputs or {}).get("industry_profile") or {}
+    competitive_factors = (inputs or {}).get("competitive_factors") or profile.get("competitive_factors")
+    compared_metrics = _metrics_from_profile(competitive_factors)
+
+    if not industry or not sector:
         try:
             import yfinance as yf
 
-            industry = (yf.Ticker(ticker).info or {}).get("industry")
+            info = yf.Ticker(ticker).info or {}
+            industry = industry or info.get("industry")
+            sector = sector or info.get("sector")
         except Exception:  # noqa: BLE001
-            industry = None
+            pass
 
-    peers = get_industry_peers(industry or "", exclude_ticker=ticker)
+    peers = get_industry_peers(industry or "", exclude_ticker=ticker, sector=sector)
 
     if not peers:
         content = {
@@ -63,7 +96,7 @@ def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidence], flo
             "note": "no industry peer set could be resolved",
         }
         evidence = Evidence(
-            evidence_id=Evidence.make_id(AGENT_ID, Capability.COMPETITOR_ANALYSIS, content),
+            evidence_id=Evidence.make_id(AGENT_ID, Capability.COMPETITOR_ANALYSIS, content, run_id),
             run_id=run_id, task_id=task_id, agent_id=AGENT_ID,
             capability=Capability.COMPETITOR_ANALYSIS,
             source_type=SourceType.MARKET_DATA, source_name="Yahoo Finance industry data",
@@ -79,7 +112,7 @@ def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidence], flo
     peer_metrics = {t: m for t, m in all_metrics.items() if t != ticker}
 
     comparison = {}
-    for metric in _COMPARED_METRICS:
+    for metric in compared_metrics:
         peer_values = [m.get(metric) for m in peer_metrics.values()]
         peer_median = median(peer_values)
         subject_value = subject.get(metric)
@@ -101,6 +134,8 @@ def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidence], flo
 
     content = {
         "ticker": ticker,
+        "profile_id": profile.get("profile_id") or (inputs or {}).get("profile_id"),
+        "competitive_factors": competitive_factors,
         "industry": industry,
         "peers": peers,
         "peer_count": len(peer_metrics),
@@ -111,7 +146,7 @@ def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidence], flo
     }
 
     evidence = Evidence(
-        evidence_id=Evidence.make_id(AGENT_ID, Capability.COMPETITOR_ANALYSIS, content),
+        evidence_id=Evidence.make_id(AGENT_ID, Capability.COMPETITOR_ANALYSIS, content, run_id),
         run_id=run_id, task_id=task_id, agent_id=AGENT_ID,
         capability=Capability.COMPETITOR_ANALYSIS,
         source_type=SourceType.MARKET_DATA,

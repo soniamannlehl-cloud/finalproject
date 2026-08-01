@@ -182,11 +182,19 @@ def get_financials(ticker: str) -> dict:
     """
     Normalized financial inputs for the deterministic ratio calculations.
 
-    Prefers filed statement values over yfinance's precomputed `.info`
-    fields, falling back to `.info` only when a statement row is missing --
-    the statements are the primary source and `.info` is a convenience layer
-    that is sometimes stale or inconsistent with them.
+    Chain: FMP (if keyed) -> yfinance.
     """
+    from . import fmp_tool
+
+    fmp_data = fmp_tool.get_financials(ticker)
+    if fmp_data:
+        return fmp_data
+
+    from . import polygon_tool
+
+    poly = polygon_tool.get_quote(ticker)
+    price_override = poly.get("price") if poly else None
+
     try:
         info, income, balance, cash = _raw_financials(ticker)
     except Exception as e:  # noqa: BLE001
@@ -215,7 +223,7 @@ def get_financials(ticker: str) -> dict:
     return {
         "ticker": ticker,
         "currency": info.get("currency"),
-        "price": info.get("currentPrice") or info.get("regularMarketPrice"),
+        "price": price_override or info.get("currentPrice") or info.get("regularMarketPrice"),
         "market_cap": info.get("marketCap"),
         "enterprise_value": info.get("enterpriseValue"),
         "shares_outstanding": shares,

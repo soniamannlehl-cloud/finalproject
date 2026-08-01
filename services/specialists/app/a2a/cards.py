@@ -21,6 +21,7 @@ from ..agents import (
     competitor_analyst,
     earnings_analyst,
     financial_analyst,
+    investment_driver_agent,
     news_analyst,
     risk_analyst,
     sec_filings,
@@ -47,6 +48,7 @@ CAPABILITY_HANDLERS: dict[str, Callable] = {
     Capability.VALUATION.value: valuation_analyst.handle,
     Capability.EARNINGS_CALL.value: earnings_analyst.handle,
     Capability.RISK_ANALYSIS.value: risk_analyst.handle,
+    Capability.INVESTMENT_DRIVERS.value: investment_driver_agent.handle,
 }
 
 # agent_id -> the capabilities that agent serves.
@@ -63,6 +65,7 @@ AGENT_CAPABILITIES: dict[str, list[str]] = {
     valuation_analyst.AGENT_ID: [Capability.VALUATION.value],
     earnings_analyst.AGENT_ID: [Capability.EARNINGS_CALL.value],
     risk_analyst.AGENT_ID: [Capability.RISK_ANALYSIS.value],
+    investment_driver_agent.AGENT_ID: [Capability.INVESTMENT_DRIVERS.value],
 }
 
 _SKILL_SPECS: dict[str, dict] = {
@@ -150,10 +153,19 @@ _SKILL_SPECS: dict[str, dict] = {
     Capability.RISK_ANALYSIS.value: {
         "name": "Risk Analysis",
         "description": (
-            "Risks detected by deterministic thresholds over computed financial "
-            "metrics, combined with industry-specific risk context."
+            "Risks detected by industry-profile threshold rules over computed "
+            "financial metrics, combined with business-specific risk context."
         ),
         "tags": ["risk", "leverage", "liquidity"],
+        "examples": ["NVDA"],
+    },
+    Capability.INVESTMENT_DRIVERS.value: {
+        "name": "Investment Drivers",
+        "description": (
+            "Assesses industry-specific investment drivers and KPIs from the "
+            "selected profile against computed financial evidence."
+        ),
+        "tags": ["drivers", "kpi", "investment thesis"],
         "examples": ["NVDA"],
     },
 }
@@ -190,8 +202,12 @@ _AGENT_DESCRIPTIONS: dict[str, str] = {
         "Analyzes the quantitative earnings record and consensus surprise history."
     ),
     risk_analyst.AGENT_ID: (
-        "Detects risks from measured financial signals via deterministic "
-        "thresholds rather than generic industry boilerplate."
+        "Detects risks from measured financial signals via industry-profile "
+        "threshold rules rather than generic boilerplate."
+    ),
+    investment_driver_agent.AGENT_ID: (
+        "Evaluates industry-specific investment drivers and KPIs defined in "
+        "the Planner's selected profile."
     ),
 }
 

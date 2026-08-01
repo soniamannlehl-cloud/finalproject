@@ -40,14 +40,13 @@ class Settings(BaseSettings):
     # STRONG: errors here corrupt every downstream stage.
     model_strong: str = "gpt-4o"
 
-    # Role -> tier assignment. Planner and the semantic safety checks get the
-    # strong tier because a bad plan wastes an entire run and a missed
-    # hallucination defeats the platform's core guarantee.
-    model_planner: str = "strong"
+    # Role -> tier assignment. Planner and one-line thesis polish use the cheap
+    # tier because industry selection is deterministic and the thesis stance is
+    # already computed from signals. Semantic safety still gets the strong tier.
+    model_planner: str = "cheap"
     model_validator: str = "cheap"
-    model_thesis: str = "strong"
+    model_thesis: str = "cheap"
     model_safety_semantic: str = "strong"
-    model_synthesizer: str = "strong"
     model_report_prose: str = "cheap"
 
     temperature: float = 0.0
@@ -58,10 +57,13 @@ class Settings(BaseSettings):
     max_replan_rounds: int = 2
     max_task_retries: int = 2
     max_safety_reresearch_rounds: int = 1
+    max_brief_claims: int = 40
 
     # --- observability ---
     langsmith_api_key: str = ""
-    langsmith_project: str = "ai-investment-research-platform"
+    langsmith_project: str = "investment-research-platform"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_tracing: bool = True
     otel_exporter_otlp_endpoint: str = ""
 
     def resolve_model(self, role: str) -> str:

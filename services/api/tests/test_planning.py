@@ -9,8 +9,8 @@ in a REIT's metric set.
 
 import pytest
 from contracts import Criticality, IndustryPlaybook, ValuationMethod
+from contracts.industry_profiles import PROFILES, classify, get_profile
 
-from app.planning import playbooks
 from app.planning.planner import _build_tasks, build_plan
 
 
@@ -22,34 +22,38 @@ class TestClassification:
         ("Real Estate", "REIT - Retail", IndustryPlaybook.REIT),
         ("Healthcare", "Biotechnology", IndustryPlaybook.HEALTHCARE),
         ("Energy", "Oil & Gas Integrated", IndustryPlaybook.ENERGY),
-        ("Consumer Cyclical", "Specialty Retail", IndustryPlaybook.CONSUMER),
+        ("Consumer Cyclical", "Specialty Retail", IndustryPlaybook.RETAIL),
+        ("Consumer Defensive", "Packaged Foods", IndustryPlaybook.CONSUMER_STAPLES),
         ("Utilities", "Utilities - Regulated Electric", IndustryPlaybook.UTILITIES),
+        ("Financial Services", "Insurance - Life", IndustryPlaybook.INSURANCE),
+        ("Communication Services", "Telecom Services", IndustryPlaybook.TELECOMMUNICATIONS),
+        ("Industrials", "Aerospace & Defense", IndustryPlaybook.INDUSTRIALS),
     ])
     def test_classifies_known_industries(self, sector, industry, expected):
-        assert playbooks.classify(sector, industry)[0] == expected
+        assert classify(sector, industry)[0] == expected
 
     def test_industry_outranks_sector(self):
         """
         A REIT sits in the Real Estate sector but so do brokerages. The more
         specific industry string must win.
         """
-        assert playbooks.classify("Real Estate", "REIT - Office")[0] == IndustryPlaybook.REIT
+        assert classify("Real Estate", "REIT - Office")[0] == IndustryPlaybook.REIT
 
     def test_unknown_falls_back_to_generic_with_a_reason(self):
-        classification, reason = playbooks.classify("Nonexistent", "Nonexistent")
+        classification, reason = classify("Nonexistent", "Nonexistent")
         assert classification == IndustryPlaybook.GENERIC
-        assert "no playbook matched" in reason
+        assert "no profile matched" in reason
 
     def test_missing_classification_data_is_safe(self):
-        assert playbooks.classify(None, None)[0] == IndustryPlaybook.GENERIC
+        assert classify(None, None)[0] == IndustryPlaybook.GENERIC
 
 
 class TestPlaybooksDiffer:
     """The core anti-generic-analysis guarantee."""
 
     def test_bank_and_reit_use_different_valuation_methods(self):
-        bank = playbooks.get_playbook(IndustryPlaybook.BANKING)
-        reit = playbooks.get_playbook(IndustryPlaybook.REIT)
+        bank = get_profile(IndustryPlaybook.BANKING)
+        reit = get_profile(IndustryPlaybook.REIT)
         assert set(bank.valuation_methods).isdisjoint(reit.valuation_methods)
 
     def test_reit_uses_ffo_not_pe(self):
@@ -57,35 +61,36 @@ class TestPlaybooksDiffer:
         REITs report heavy non-cash depreciation, so P/E is misleading and FFO
         is the correct lens. Getting this backwards is a classic novice error.
         """
-        reit = playbooks.get_playbook(IndustryPlaybook.REIT)
+        reit = get_profile(IndustryPlaybook.REIT)
         assert ValuationMethod.FFO_MULTIPLE in reit.valuation_methods
         assert ValuationMethod.PE_MULTIPLE not in reit.valuation_methods
 
     def test_bank_uses_price_to_book(self):
-        bank = playbooks.get_playbook(IndustryPlaybook.BANKING)
+        bank = get_profile(IndustryPlaybook.BANKING)
         assert ValuationMethod.PRICE_BOOK in bank.valuation_methods
         assert "net_interest_margin" in bank.required_metrics
 
     def test_technology_uses_rule_of_40(self):
-        tech = playbooks.get_playbook(IndustryPlaybook.TECHNOLOGY)
+        tech = get_profile(IndustryPlaybook.TECHNOLOGY)
         assert ValuationMethod.RULE_OF_40 in tech.valuation_methods
 
     def test_every_playbook_declares_metrics_and_risks(self):
-        for classification, playbook in playbooks.PLAYBOOKS.items():
-            assert playbook.required_metrics, f"{classification} has no metrics"
-            assert playbook.key_risks, f"{classification} has no key risks"
-            assert playbook.rationale, f"{classification} has no rationale"
+        for profile_id, profile in PROFILES.items():
+            assert profile.required_financial_metrics, f"{profile_id} has no metrics"
+            assert profile.business_risks, f"{profile_id} has no key risks"
+            assert profile.rationale, f"{profile_id} has no rationale"
 
     def test_all_playbooks_include_universal_capabilities(self):
-        """Every company gets profile, financials, and news regardless of industry."""
-        for playbook in playbooks.PLAYBOOKS.values():
-            assert "company.profile" in playbook.required_capabilities
-            assert "financials.statements" in playbook.required_capabilities
+        """Every company gets profile, financials, news, and investment drivers."""
+        for _profile_id, profile in PROFILES.items():
+            assert "company.profile" in profile.required_capabilities
+            assert "financials.statements" in profile.required_capabilities
+            assert "investment.drivers" in profile.required_capabilities
 
 
 class TestTaskGraph:
     def test_ratios_depend_on_statements(self):
-        tech = playbooks.get_playbook(IndustryPlaybook.TECHNOLOGY)
+        tech = get_profile(IndustryPlaybook.TECHNOLOGY)
         tasks = _build_tasks(tech, "NVDA", "NVIDIA")
         ratios = next(t for t in tasks if t.capability == "financials.ratios")
         assert "task_financials_statements" in ratios.depends_on
@@ -95,14 +100,14 @@ class TestTaskGraph:
         A dependency on a capability this playbook never scheduled would leave
         the task waiting forever, so unscheduled deps must be dropped.
         """
-        generic = playbooks.get_playbook(IndustryPlaybook.GENERIC)
+        generic = get_profile(IndustryPlaybook.GENERIC)
         tasks = _build_tasks(generic, "X", "X Corp")
         scheduled = {t.task_id for t in tasks}
         for task in tasks:
             assert set(task.depends_on) <= scheduled
 
     def test_required_and_optional_criticality_is_assigned(self):
-        tech = playbooks.get_playbook(IndustryPlaybook.TECHNOLOGY)
+        tech = get_profile(IndustryPlaybook.TECHNOLOGY)
         tasks = _build_tasks(tech, "NVDA", "NVIDIA")
         criticalities = {t.criticality for t in tasks}
         assert Criticality.REQUIRED in criticalities

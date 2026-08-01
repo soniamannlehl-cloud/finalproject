@@ -6,20 +6,23 @@ plan carried in state and dispatched via the `Send` API -- never from
 rebuilding the graph per request, which would break checkpoint
 compatibility across resumes and fragment traces.
 
-M2 topology:
+Full topology:
 
     START
-      -> validate_company        (Checkpoint #1 interrupt lives here)
-      -> planner                 selects industry playbook, emits task DAG
-      -> director                decides the next execution layer
+      -> validate_company        (HITL #1 interrupt)
+      -> planner                 industry playbook -> task DAG
+      -> director                next execution layer
       -> [specialist_proxy] x N  parallel A2A dispatch via Send
       -> collect                 join barrier
+      -> thesis                  living thesis update
       -> director                (loop while layers remain)
+      -> safety                  L1/L2 verification
+      -> committee               CrewAI Bull/Bear/CIO via A2A
+      -> synthesizer             deterministic policy gate
+      -> report_generator        PDF-ready report for committee review
+      -> hitl_2                  HITL #2 interrupt (human reviews report + recommendation)
+      -> planner                 (replan loop on request_analysis)
       -> END
-
-The director <-> collect cycle is what executes a multi-layer plan: a plan
-with statements -> ratios -> valuation passes through the Director three
-times, dispatching one parallel batch each time.
 """
 
 import logging
@@ -36,10 +39,21 @@ from ..director.director import (
 from ..planning.planner import planner_node
 from ..safety.pipeline import safety_node
 from ..thesis.agent import thesis_node
+from .nodes.committee import committee_node
+from .nodes.hitl_2 import hitl_2_node, route_after_hitl_2
+from .nodes.report import report_generator_node
+from .nodes.synthesizer import synthesizer_node
 from .nodes.validate import route_after_validation, validate_company_node
 from .state import ResearchState
 
 log = logging.getLogger(__name__)
+
+
+def route_after_safety(state: dict) -> str:
+    """Skip committee only when the safety pipeline itself crashed."""
+    if state.get("status") == "safety_failed":
+        return "failed"
+    return "continue"
 
 
 def build_graph() -> StateGraph:
@@ -53,6 +67,10 @@ def build_graph() -> StateGraph:
     graph.add_node("collect", collect_node)
     graph.add_node("thesis", thesis_node)
     graph.add_node("safety", safety_node)
+    graph.add_node("committee", committee_node)
+    graph.add_node("synthesizer", synthesizer_node)
+    graph.add_node("hitl_2", hitl_2_node)
+    graph.add_node("report_generator", report_generator_node)
 
     graph.add_edge(START, "validate_company")
 
@@ -90,9 +108,21 @@ def build_graph() -> StateGraph:
         },
     )
 
-    # Safety runs once, after all research is in. M6 routes its output to the
-    # committee; for now it terminates the run.
-    graph.add_edge("safety", END)
+    graph.add_conditional_edges(
+        "safety",
+        route_after_safety,
+        {"continue": "committee", "failed": END},
+    )
+
+    graph.add_edge("committee", "synthesizer")
+    graph.add_edge("synthesizer", "report_generator")
+    graph.add_edge("report_generator", "hitl_2")
+
+    graph.add_conditional_edges(
+        "hitl_2",
+        route_after_hitl_2,
+        {"replan": "planner", "complete": END},
+    )
 
     return graph
 

@@ -62,7 +62,7 @@ def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidence], flo
     confidence = 0.95 if (has_annual and facts and facts["concepts_found"]) else 0.7
 
     evidence = Evidence(
-        evidence_id=Evidence.make_id(AGENT_ID, Capability.SEC_FILINGS, content),
+        evidence_id=Evidence.make_id(AGENT_ID, Capability.SEC_FILINGS, content, run_id),
         run_id=run_id, task_id=task_id, agent_id=AGENT_ID,
         capability=Capability.SEC_FILINGS,
         source_type=SourceType.SEC_FILING,

@@ -37,7 +37,7 @@ def handle(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidence], flo
     degraded = None if completeness == 1.0 else "profile missing some classification fields"
 
     evidence = Evidence(
-        evidence_id=Evidence.make_id(AGENT_ID, Capability.COMPANY_PROFILE, profile),
+        evidence_id=Evidence.make_id(AGENT_ID, Capability.COMPANY_PROFILE, profile, run_id),
         run_id=run_id,
         task_id=task_id,
         agent_id=AGENT_ID,

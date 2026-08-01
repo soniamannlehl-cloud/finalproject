@@ -86,12 +86,15 @@ class ResearchState(TypedDict, total=False):
     thesis_version: Annotated[int | None, keep_last]
     thesis_stance: Annotated[str | None, keep_last]
     thesis_confidence: Annotated[float | None, keep_last]
+    thesis_framework: Annotated[dict | None, keep_last]
+    industry_profile: Annotated[dict | None, keep_last]
 
     # --- safety (M5) --------------------------------------------------------
     safety_report: dict | None
     evidence_score: float | None
 
     # --- committee + HITL #2 (M6/M7) ---------------------------------------
+    committee_proposal: dict | None
     recommendation: dict | None
     committee_decision: str | None     # contracts.HumanDecision
     committee_feedback: str | None
@@ -134,8 +137,11 @@ def initial_state(run_id: str, raw_query: str, trace_id: str | None = None) -> R
         thesis_version=None,
         thesis_stance=None,
         thesis_confidence=None,
+        thesis_framework=None,
+        industry_profile=None,
         safety_report=None,
         evidence_score=None,
+        committee_proposal=None,
         recommendation=None,
         committee_decision=None,
         committee_feedback=None,

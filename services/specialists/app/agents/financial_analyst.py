@@ -19,23 +19,33 @@ from datetime import datetime, timezone
 from contracts import Capability, Claim, Evidence, Polarity, SourceType
 
 from ..config import get_settings
-from ..tools.financial_calculations import compute_all
+from ..tools.financial_calculations import compute_metrics
 from ..tools.yfinance_tool import get_financials
 
 log = logging.getLogger(__name__)
 
 AGENT_ID = "financial_analyst_agent"
 
-_INTERPRET_PROMPT = """You are a senior financial analyst reviewing ALREADY-COMPUTED metrics.
+def _fmt_money(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    for unit, scale in (("T", 1e12), ("B", 1e9), ("M", 1e6)):
+        if abs(value) >= scale:
+            return f"${value / scale:.2f}{unit}"
+    return f"${value:,.0f}"
+
+
+_INTERPRET_PROMPT = """You are a senior financial analyst reviewing ALREADY-COMPUTED metrics for a {industry_label} company.
 
 Company: {company_name} ({ticker})
+Business model context: {business_model}
 
 Computed metrics (do NOT recompute or dispute these numbers):
 {metrics}
 
-Write 3-5 sentences assessing this company's financial health. Rules:
+Write 3-5 sentences assessing this company's financial health using the industry-appropriate lens above. Rules:
 - Interpret the numbers given; never state a figure that is not listed above.
-- Where a metric is marked "not meaningful", explain briefly why that matters.
+- Where a metric is marked "not meaningful", explain briefly why that matters for this industry.
 - Be balanced: note both strengths and weaknesses.
 - Do not give investment advice or a buy/sell view."""
 
@@ -50,7 +60,7 @@ def _format_metrics(metrics: dict) -> str:
     return "\n".join(lines)
 
 
-def _interpret(company_name: str, ticker: str, metrics: dict) -> str | None:
+def _interpret(company_name: str, ticker: str, metrics: dict, profile: dict | None = None) -> str | None:
     """
     LLM interpretation of computed metrics. Returns None if unavailable.
 
@@ -74,6 +84,8 @@ def _interpret(company_name: str, ticker: str, metrics: dict) -> str | None:
                 "content": _INTERPRET_PROMPT.format(
                     company_name=company_name, ticker=ticker,
                     metrics=_format_metrics(metrics),
+                    industry_label=(profile or {}).get("display_name", "general"),
+                    business_model=(profile or {}).get("business_model", "operating company"),
                 ),
             }],
         )
@@ -107,7 +119,7 @@ def _data_quality(financials: dict) -> tuple[float, str | None]:
 
 def _statements_evidence(run_id: str, task_id: str, ticker: str, financials: dict, confidence: float) -> Evidence:
     return Evidence(
-        evidence_id=Evidence.make_id(AGENT_ID, Capability.FINANCIAL_STATEMENTS, financials),
+        evidence_id=Evidence.make_id(AGENT_ID, Capability.FINANCIAL_STATEMENTS, financials, run_id),
         run_id=run_id, task_id=task_id, agent_id=AGENT_ID,
         capability=Capability.FINANCIAL_STATEMENTS,
         source_type=SourceType.FINANCIAL_STATEMENT,
@@ -115,7 +127,10 @@ def _statements_evidence(run_id: str, task_id: str, ticker: str, financials: dic
         source_url=f"https://finance.yahoo.com/quote/{ticker}/financials",
         citation=f"Reported financial statements for {ticker}, latest period {financials.get('latest_period')}",
         content=financials,
-        summary=f"Revenue {financials.get('revenue')}, net income {financials.get('net_income')}",
+        summary=(
+            f"Revenue {_fmt_money(financials.get('revenue'))}, "
+            f"net income {_fmt_money(financials.get('net_income'))}"
+        ),
         retrieved_at=datetime.now(timezone.utc),
         confidence=confidence,
     )
@@ -145,13 +160,22 @@ def handle_ratios(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidenc
     if not ticker:
         raise ValueError("financials.ratios requires a 'ticker' input")
 
+    profile = (inputs or {}).get("industry_profile") or {}
+    required_metrics = (
+        (inputs or {}).get("required_metrics")
+        or profile.get("required_financial_metrics")
+    )
+
     financials = get_financials(ticker)
-    metrics = compute_all(financials)  # <-- all arithmetic happens here, in Python
+    metrics = compute_metrics(financials, required_metrics)
     confidence, degraded = _data_quality(financials)
 
     meaningful = sum(1 for m in metrics.values() if m["meaningful"])
     content = {
         "ticker": ticker,
+        "profile_id": profile.get("profile_id") or (inputs or {}).get("profile_id"),
+        "industry_profile": profile.get("display_name"),
+        "required_metrics": required_metrics,
         "metrics": metrics,
         "meaningful_count": meaningful,
         "total_count": len(metrics),
@@ -160,7 +184,7 @@ def handle_ratios(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidenc
     }
 
     evidence = Evidence(
-        evidence_id=Evidence.make_id(AGENT_ID, Capability.FINANCIAL_RATIOS, content),
+        evidence_id=Evidence.make_id(AGENT_ID, Capability.FINANCIAL_RATIOS, content, run_id),
         run_id=run_id, task_id=task_id, agent_id=AGENT_ID,
         capability=Capability.FINANCIAL_RATIOS,
         source_type=SourceType.COMPUTED,
@@ -176,7 +200,7 @@ def handle_ratios(inputs: dict, run_id: str, task_id: str) -> tuple[list[Evidenc
     )
 
     claims: list[Claim] = []
-    if interpretation := _interpret(company_name, ticker, metrics):
+    if interpretation := _interpret(company_name, ticker, metrics, profile):
         claims.append(
             Claim(
                 claim_id=f"claim_{evidence.evidence_id[3:]}_interp",

@@ -5,19 +5,9 @@ Turns a confirmed company into an executable `ResearchPlan`: which
 specialists to run, in what dependency order, using which metrics and
 valuation methods.
 
-Two design decisions worth stating plainly:
-
-1. The plan is DATA, not control flow. It is logged, diffed across
-   revisions, rendered in the UI, and asserted against in tests. That is
-   what makes the planning "explicit and inspectable" rather than a
-   pipeline with a planning-shaped comment on it.
-
-2. Playbook selection is DETERMINISTIC; the LLM refines and explains it.
-   The industry framework a bank or REIT requires is settled knowledge, not
-   something worth re-deriving probabilistically on every run. The LLM adds
-   company-specific rationale and can override the classification when it
-   has a defensible reason -- but the system produces a competent plan with
-   no LLM at all, which is why it stays demonstrable without an API key.
+The Planner first selects an industry profile (data-driven configuration),
+then builds a task DAG that passes that profile to every downstream agent.
+Adding a new industry requires only a new profile — not agent code changes.
 """
 
 import json
@@ -26,19 +16,20 @@ import uuid
 from datetime import datetime, timezone
 
 from contracts import Criticality, IndustryPlaybook, ResearchPlan, TaskSpec
+from contracts.industry_profiles import classify, get_profile
 
+from ..committee.brief_builder import parse_replan_capabilities
 from ..config import get_settings
-from . import playbooks
 
 log = logging.getLogger(__name__)
 
-# Capabilities that must run before dependent analysis can start. Valuation
-# needs statements; competitor analysis needs to know what the company does.
+# Capabilities that must run before dependent analysis can start.
 _DEPENDENCIES: dict[str, list[str]] = {
     "financials.ratios": ["financials.statements"],
     "valuation.estimate": ["financials.statements", "financials.ratios"],
     "competitors.analysis": ["company.profile"],
-    "risk.analysis": ["company.profile", "financials.statements"],
+    "risk.analysis": ["company.profile", "financials.statements", "financials.ratios"],
+    "investment.drivers": ["company.profile", "financials.ratios"],
 }
 
 _CLASSIFY_PROMPT = """You are a senior equity research analyst assigning a company to a research framework.
@@ -64,17 +55,11 @@ def _llm_refine(
     company_name: str, ticker: str, sector: str | None, industry: str | None,
     default: IndustryPlaybook, default_reason: str,
 ) -> tuple[IndustryPlaybook, str]:
-    """
-    Ask the LLM to confirm or override the deterministic classification.
-
-    Any failure returns the deterministic choice unchanged: a planner that
-    cannot plan without a working LLM would make the whole platform as
-    reliable as its flakiest dependency.
-    """
     settings = get_settings()
+    profile = get_profile(default)
     if not settings.openai_api_key:
         return default, (
-            f"{playbooks.get_playbook(default).rationale} "
+            f"{profile.rationale} "
             f"(Framework selected deterministically: {default_reason}. "
             "No LLM configured, so no company-specific refinement was applied.)"
         )
@@ -93,7 +78,7 @@ def _llm_refine(
                     company_name=company_name, ticker=ticker,
                     sector=sector, industry=industry,
                     default_classification=default.value, default_reason=default_reason,
-                    options=", ".join(p.value for p in IndustryPlaybook),
+                    options=", ".join(p.value for p in IndustryPlaybook if p != IndustryPlaybook.GENERIC),
                 ),
             }],
         )
@@ -101,8 +86,7 @@ def _llm_refine(
     except Exception as e:  # noqa: BLE001
         log.warning("planner LLM refinement unavailable, using deterministic plan: %s", e)
         return default, (
-            f"{playbooks.get_playbook(default).rationale} "
-            f"(Selected deterministically: {default_reason}.)"
+            f"{profile.rationale} (Selected deterministically: {default_reason}.)"
         )
 
     try:
@@ -110,60 +94,78 @@ def _llm_refine(
     except ValueError:
         chosen = default
 
-    rationale = payload.get("rationale") or playbooks.get_playbook(chosen).rationale
+    rationale = payload.get("rationale") or get_profile(chosen).rationale
     if chosen != default:
         rationale = f"{rationale} (Overrode deterministic choice of '{default.value}'.)"
     return chosen, rationale
 
 
+def _profile_inputs(profile, sector: str | None, industry: str | None) -> dict:
+    """Shared industry context passed to every industry-aware specialist."""
+    payload = profile.task_payload()
+    return {
+        "industry_profile": payload,
+        "profile_id": profile.profile_id.value,
+        "sector": sector,
+        "industry": industry,
+    }
+
+
 def _build_tasks(
-    playbook: playbooks.Playbook, ticker: str, company_name: str,
+    profile,
+    ticker: str,
+    company_name: str,
+    sector: str | None = None,
     industry: str | None = None,
 ) -> list[TaskSpec]:
-    """
-    Expand a playbook's capabilities into a dependency-ordered task DAG.
-
-    Dependencies come from `_DEPENDENCIES` and are filtered to capabilities
-    actually present in this plan -- so a playbook that omits
-    `financials.ratios` doesn't leave `valuation.estimate` waiting forever on
-    a task that was never scheduled.
-    """
-    selected = playbook.required_capabilities + playbook.optional_capabilities
+    """Expand a profile's capabilities into a dependency-ordered task DAG."""
+    selected = profile.required_capabilities + profile.optional_capabilities
     present = set(selected)
     base_inputs = {"ticker": ticker, "company_name": company_name}
+    profile_ctx = _profile_inputs(profile, sector, industry)
 
-    # Capability-specific context from the playbook. This is how the industry
-    # framework actually reaches the specialists: the valuation agent is told
-    # WHICH methods to attempt, and the risk agent is told which industry
-    # risks matter -- rather than each agent re-deriving that itself.
     extra_inputs: dict[str, dict] = {
-        "valuation.estimate": {
-            "valuation_methods": [v.value for v in playbook.valuation_methods],
-            "industry": industry,
+        "financials.ratios": {
+            **profile_ctx,
+            "required_metrics": profile.required_financial_metrics,
         },
-        "risk.analysis": {"industry_risks": playbook.key_risks, "industry": industry},
-        "competitors.analysis": {"industry": industry},
+        "valuation.estimate": {
+            **profile_ctx,
+            "valuation_methods": [v.value for v in profile.valuation_methods],
+        },
+        "risk.analysis": {
+            **profile_ctx,
+            "industry_risks": profile.business_risks,
+            "risk_rules": [r.model_dump(mode="json") for r in profile.risk_rules],
+        },
+        "competitors.analysis": {
+            **profile_ctx,
+            "competitive_factors": profile.competitive_factors,
+        },
+        "investment.drivers": {
+            **profile_ctx,
+            "investment_drivers": profile.investment_drivers,
+            "key_performance_indicators": profile.key_performance_indicators,
+        },
     }
 
     tasks: list[TaskSpec] = []
     for capability in selected:
-        required = capability in playbook.required_capabilities
+        required = capability in profile.required_capabilities
         depends = [d for d in _DEPENDENCIES.get(capability, []) if d in present]
 
         tasks.append(
             TaskSpec(
                 task_id=f"task_{capability.replace('.', '_')}",
                 capability=capability,
-                inputs={**base_inputs, **extra_inputs.get(capability, {})},
-                # Dependencies are declared by capability; task_ids follow the
-                # same derivation, so this stays consistent.
+                inputs={**base_inputs, **extra_inputs.get(capability, profile_ctx)},
                 depends_on=[f"task_{d.replace('.', '_')}" for d in depends],
                 criticality=Criticality.REQUIRED if required else Criticality.OPTIONAL,
                 timeout_s=90,
                 max_retries=get_settings().max_task_retries,
                 rationale=(
                     f"{'Required' if required else 'Optional'} for "
-                    f"{playbook.display_name} analysis."
+                    f"{profile.display_name} analysis ({profile.business_model[:60]}…)."
                 ),
             )
         )
@@ -177,24 +179,16 @@ def build_plan(
     replan_reason: str | None = None,
     extra_capabilities: list[str] | None = None,
 ) -> ResearchPlan:
-    """
-    Produce a validated ResearchPlan.
-
-    `ResearchPlan` self-validates its DAG on construction, so a malformed
-    plan raises here rather than hanging the Director mid-execution.
-    """
-    default, reason = playbooks.classify(sector, industry)
+    default, reason = classify(sector, industry)
     classification, rationale = _llm_refine(
         company_name, ticker, sector, industry, default, reason
     )
-    playbook = playbooks.get_playbook(classification)
+    profile = get_profile(classification)
+    tasks = _build_tasks(profile, ticker, company_name, sector, industry)
 
-    tasks = _build_tasks(playbook, ticker, company_name, industry)
-
-    # A replan (HITL #2 requested more analysis) can add capabilities the
-    # original plan omitted.
     if extra_capabilities:
         existing = {t.capability for t in tasks}
+        ctx = _profile_inputs(profile, sector, industry)
         for capability in extra_capabilities:
             if capability in existing:
                 continue
@@ -202,7 +196,7 @@ def build_plan(
                 TaskSpec(
                     task_id=f"task_{capability.replace('.', '_')}",
                     capability=capability,
-                    inputs={"ticker": ticker, "company_name": company_name},
+                    inputs={"ticker": ticker, "company_name": company_name, **ctx},
                     criticality=Criticality.REQUIRED,
                     max_retries=get_settings().max_task_retries,
                     rationale="Added on replan in response to reviewer feedback.",
@@ -220,8 +214,9 @@ def build_plan(
         classification=classification,
         industry=industry or "unknown",
         sector=sector or "unknown",
-        valuation_methods=playbook.valuation_methods,
-        required_metrics=playbook.required_metrics,
+        valuation_methods=profile.valuation_methods,
+        required_metrics=profile.required_financial_metrics,
+        industry_profile=profile.task_payload(),
         tasks=tasks,
         fallback_strategy=(
             "Optional task failures are recorded as declared gaps. Required task "
@@ -234,14 +229,11 @@ def build_plan(
 
 
 async def planner_node(state: dict) -> dict:
-    """
-    LangGraph node: build the research plan for a confirmed company.
-
-    Serializes the plan into state so the Director, the UI, and LangSmith
-    traces all read the same artifact.
-    """
+    """LangGraph node: build the research plan for a confirmed company."""
     run_id = state["run_id"]
     revision = state.get("plan_revision", 0)
+    feedback = state.get("committee_feedback") if revision > 0 else None
+    extra_caps = parse_replan_capabilities(feedback) if feedback else None
 
     try:
         plan = build_plan(
@@ -252,7 +244,8 @@ async def planner_node(state: dict) -> dict:
             industry=state.get("industry"),
             revision=revision,
             parent_revision=revision - 1 if revision > 0 else None,
-            replan_reason=state.get("committee_feedback") if revision > 0 else None,
+            replan_reason=feedback,
+            extra_capabilities=extra_caps,
         )
     except Exception as e:  # noqa: BLE001
         log.exception("planning failed for run %s", run_id)
@@ -267,8 +260,12 @@ async def planner_node(state: dict) -> dict:
         run_id, plan.classification.value, len(plan.tasks), len(layers),
     )
 
+    from ..observability.events import log_event
+    log_event(run_id, "planner", classification=plan.classification.value, tasks=len(plan.tasks))
+
     return {
         "plan": plan.model_dump(mode="json"),
         "classification": plan.classification.value,
+        "industry_profile": plan.industry_profile,
         "status": "planned",
     }

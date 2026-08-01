@@ -8,6 +8,7 @@
 #   api          :8080  control plane   -- LangGraph, HITL, planning, safety
 #   specialists  :8081  data plane      -- research agents + provider APIs
 #   committee    :8082  deliberation    -- CrewAI Bull/Bear/CIO
+#   frontend    :3000  Next.js UI
 #   postgres     :5432  checkpoints + evidence repository
 #
 # Start everything:  docker compose up --build
@@ -47,15 +48,23 @@ services:
       COMMITTEE_URL: http://committee:8082
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
-      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-ai-investment-research-platform}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-investment-research-platform}
+      LANGSMITH_TRACING: "true"
+      LANGSMITH_ENDPOINT: https://api.smith.langchain.com
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       postgres:
         condition: service_healthy
       specialists:
-        condition: service_started
+        condition: service_healthy
       committee:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks: [irp]
     restart: unless-stopped
 
@@ -75,6 +84,12 @@ services:
       POLYGON_API_KEY: ${POLYGON_API_KEY:-}
       SEC_USER_AGENT: ${SEC_USER_AGENT:-AI Investment Research Platform academic-project@example.com}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8081/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks: [irp]
     restart: unless-stopped
 
@@ -89,6 +104,33 @@ services:
       PUBLIC_BASE_URL: http://committee:8082
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8082/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [irp]
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8080
+    container_name: irp-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     networks: [irp]
     restart: unless-stopped
 

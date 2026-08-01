@@ -61,11 +61,15 @@ class IndustryPlaybook(StrEnum):
 
     TECHNOLOGY = "technology"
     BANKING = "banking"
-    REIT = "reit"
+    INSURANCE = "insurance"
     HEALTHCARE = "healthcare"
     ENERGY = "energy"
-    CONSUMER = "consumer"
-    INDUSTRIAL = "industrial"
+    RETAIL = "retail"
+    MANUFACTURING = "manufacturing"
+    CONSUMER_STAPLES = "consumer_staples"
+    REIT = "reit"
+    TELECOMMUNICATIONS = "telecommunications"
+    INDUSTRIALS = "industrials"
     UTILITIES = "utilities"
     GENERIC = "generic"          # fallback when the industry isn't recognized
 
@@ -121,7 +125,6 @@ class Capability(StrEnum):
 
     COMPANY_VALIDATE = "company.validate"
     COMPANY_PROFILE = "company.profile"
-    INDUSTRY_ANALYSIS = "industry.analysis"
     FINANCIAL_STATEMENTS = "financials.statements"
     FINANCIAL_RATIOS = "financials.ratios"
     VALUATION = "valuation.estimate"
@@ -130,3 +133,4 @@ class Capability(StrEnum):
     SEC_FILINGS = "filings.sec"
     EARNINGS_CALL = "earnings.call"
     RISK_ANALYSIS = "risk.analysis"
+    INVESTMENT_DRIVERS = "investment.drivers"

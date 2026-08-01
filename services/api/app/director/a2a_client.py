@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 
 import httpx
 from contracts import A2ATaskRequest, A2ATaskResult, TaskState
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from ..config import get_settings
 
@@ -151,8 +152,8 @@ class A2AClient:
         try:
             async with httpx.AsyncClient(timeout=self._timeout_s) as client:
                 headers = {"traceparent": traceparent} if traceparent else {}
-                resp = await client.post(
-                    endpoint, json=request.model_dump(mode="json"), headers=headers
+                resp = await self._post_with_retry(
+                    client, endpoint, request.model_dump(mode="json"), headers
                 )
                 resp.raise_for_status()
                 return A2ATaskResult.model_validate(resp.json())
@@ -164,6 +165,17 @@ class A2AClient:
             log.warning("A2A dispatch failed: %s -> %s: %s", capability, endpoint, e)
             self._discovered = False
             return _failed(f"transport error: {e}", agent_name)
+
+    @staticmethod
+    @retry(
+        retry=retry_if_exception_type((httpx.ConnectError, httpx.ReadError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
+        reraise=True,
+    )
+    async def _post_with_retry(client: httpx.AsyncClient, url: str, payload: dict, headers: dict):
+        """Retry transient network errors before surfacing a FAILED result."""
+        return await client.post(url, json=payload, headers=headers)
 
 
 _client: A2AClient | None = None

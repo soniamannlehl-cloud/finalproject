@@ -2,7 +2,7 @@
 
 *Research a public company the way an investment firm would—using a team of AI analysts that work together, verify their findings, and keep you involved in the final decision.*
 
-**Author:** Sonia Mann
+**Author:** Sonia Mann 
 **Course:** UCLA Extension — Agentic AI & Autonomous Systems (Capstone)  
 **Repository:** https://github.com/soniamannlehl-cloud/finalproject
 

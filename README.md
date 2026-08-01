@@ -1,11 +1,12 @@
 # AI Investment Research Analyst
 
 A multi-agent system that simulates how a professional investment research
-firm performs due diligence on a publicly traded company: it plans a
-research strategy, dispatches specialist agents to gather evidence, maintains
-a living investment thesis, subjects its conclusions to safety review, runs
-an adversarial investment committee, and requires human approval before any
-recommendation is finalized.
+firm performs due diligence on a publicly traded company: it plans an
+industry-aware research strategy, dispatches specialist agents to gather
+evidence, maintains a living investment thesis, subjects its conclusions to
+safety review, runs an adversarial investment committee, generates a
+structured report, and requires human approval before any recommendation is
+finalized.
 
 The emphasis is architecture, planning, explainability, and engineering
 discipline — not generating investment advice. Every factual statement in
@@ -16,29 +17,51 @@ system refuses to issue a directional call when evidence is insufficient.
 
 ---
 
+## What this system does
+
+| Feature | Description |
+|---|---|
+| **Web dashboard** | Next.js UI at `:3000` — start runs, approve checkpoints, view evidence, thesis, safety, and reports |
+| **Industry-aware planning** | 13 industry profiles (Technology, Banking, REIT, Healthcare, …) select metrics, valuation methods, and risk rules per company |
+| **10 research specialists** | 11 capabilities over A2A — financials, valuation, risk, peers, news, SEC, earnings, investment drivers |
+| **Living thesis** | Versioned stance + structured analyst framework (core question, drivers, risks, catalysts, valuation view) |
+| **Safety pipeline** | Deterministic coverage/citation checks + semantic hallucination/contradiction detection |
+| **Investment committee** | CrewAI Bull / Bear / CIO debate from a capped evidence brief only |
+| **Policy gate** | Deterministic synthesizer overrides committee when evidence is insufficient |
+| **Two HITL checkpoints** | Confirm company before spend; review full report before finalize (with replan option) |
+| **Guardrails** | Bounded retries/replans, run-scoped evidence IDs, LLM never computes financial numbers |
+
+**End-to-end workflow:**
+
+```
+validate → planner → director ⇄ specialists → collect → thesis → safety
+  → committee → synthesizer → report → HITL #2
+```
+
+---
+
 ## Architecture at a glance
 
-Three Python services with **mutually incompatible dependency trees**, split
-deliberately so each framework can be used where it is genuinely best:
+Four runtime components plus shared contracts:
 
-| Service | Port | Framework | Role |
+| Component | Port | Framework | Role |
 |---|---|---|---|
-| `api` | 8080 | **LangGraph** | Control plane — workflow, HITL, planning, safety |
-| `specialists` | 8081 | **A2A** | Data plane — research agents + provider APIs |
+| `frontend` | 3000 | **Next.js** | Web UI — research dashboard and HITL checkpoints |
+| `api` | 8080 | **LangGraph** | Control plane — workflow, HITL, planning, safety, reports |
+| `specialists` | 8081 | **A2A** | Data plane — 10 research agents + provider APIs |
 | `committee` | 8082 | **CrewAI** | Deliberation — Bull / Bear / CIO debate |
 | `postgres` | 5432 | — | Evidence repository + workflow checkpoints |
 
-The split exists so that **A2A is a real network protocol rather than
-decorated function calls**: agents are separately addressable services that
-advertise capabilities and are discovered at runtime. It also keeps the
-control plane image at ~530MB instead of ~1.8GB.
+Three Python services share **no dependency tree** — they communicate only
+through HTTP and the shared `packages/contracts` Pydantic schemas. A2A is a
+real network protocol: specialists are separately addressable and discovered
+at runtime.
 
-It is *not* justified by a dependency conflict — that hypothesis was tested
-and **refuted**. See [ARCHITECTURE.md](ARCHITECTURE.md) §
-"Dependency isolation: measured" for the experiment and what it changed.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for framework justification, data
+flow, and measured tradeoffs.
 
 ```
-  Next.js frontend
+  Next.js frontend (:3000)
         │
         ▼
   ┌───────────────┐   A2A/HTTP   ┌──────────────────┐
@@ -58,38 +81,41 @@ and **refuted**. See [ARCHITECTURE.md](ARCHITECTURE.md) §
 
 ## Quick start
 
-**Prerequisites:** Docker Desktop, and an OpenAI API key.
+**Prerequisites:** Docker Desktop and an OpenAI API key.
 
 ```bash
 cp .env.example .env
-```
+# Edit .env and set OPENAI_API_KEY
 
-Add your `OPENAI_API_KEY` to `.env`, then:
-
-```bash
 docker compose up --build
 ```
 
-Verify all services are healthy:
-
-```bash
-curl http://localhost:8080/health && curl http://localhost:8081/health && curl http://localhost:8082/health
-docker compose ps
-```
+Wait until all containers are healthy, then open the UI:
 
 | URL | What it is |
 |---|---|
-| http://localhost:8080/docs | API service — interactive OpenAPI docs |
+| **http://localhost:3000** | **Web UI** — start research and approve recommendations |
+| http://localhost:8080/docs | API — interactive OpenAPI docs |
 | http://localhost:8081/agents | Specialist fleet discovery (A2A) |
 | http://localhost:8082/health | Committee service health |
-| http://localhost:3000 | Web UI — start research and approve recommendations |
+
+Verify services:
+
+```bash
+docker compose ps
+curl http://localhost:8080/health
+```
+
+**Try a run:** open http://localhost:3000 → enter a ticker (e.g. `NVDA`) →
+confirm at Checkpoint #1 → watch evidence and thesis update → review the
+report at Checkpoint #2.
 
 ### API keys
 
 Only `OPENAI_API_KEY` is required. Every data provider has a keyless
-fallback (yfinance), so the platform runs and demonstrates gracefully with
-no paid data subscriptions — missing providers reduce the evidence score
-and are **disclosed in the report** rather than silently ignored.
+fallback (yfinance), so the platform runs gracefully without paid data
+subscriptions — missing providers reduce the evidence score and are
+**disclosed in the report** rather than silently ignored.
 
 | Key | Required | Purpose |
 |---|---|---|
@@ -105,20 +131,32 @@ and are **disclosed in the report** rather than silently ignored.
 ## Repository layout
 
 ```
-├── packages/contracts/     Shared Pydantic schemas — the seam between services.
-│                           Includes industry_profiles/ (Technology, Banking, …).
+├── packages/contracts/     Shared Pydantic schemas — the seam between services
+│                           industry_profiles/ (Technology, Banking, REIT, …)
 ├── services/
 │   ├── api/                LangGraph workflow, HITL, planning, safety, reports
-│   ├── specialists/        ★ Research agents live in specialists/app/agents/
+│   ├── specialists/        ★ Research agents → specialists/app/agents/
 │   └── committee/          CrewAI Bull / Bear / CIO
-├── frontend/               Next.js + React + Tailwind
+├── frontend/               Next.js + React + Tailwind dashboard
 ├── ops/db/init/            Postgres schema
+├── evaluation/             Consistency harness (optional)
 └── docs/                   Guides — start with PROJECT_STRUCTURE.md & AGENTS.md
 ```
 
-**Finding agent code?** Research agents → `services/specialists/app/agents/`. Workflow logic → `services/api/app/graph/`. Committee → `services/committee/app/crew/`.
+**Where to look:**
 
-See **[docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)** for a full folder map and **[docs/AGENTS.md](docs/AGENTS.md)** for every agent and what it does.
+| Need | Path |
+|---|---|
+| Research agents (10) | `services/specialists/app/agents/` |
+| Capability registry | `services/specialists/app/a2a/cards.py` |
+| Workflow topology | `services/api/app/graph/builder.py` |
+| Industry profiles | `packages/contracts/src/contracts/industry_profiles/` |
+| Committee debate | `services/committee/app/crew/` |
+| Frontend UI | `frontend/src/` |
+
+See **[docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)** for a full
+folder map and **[docs/AGENTS.md](docs/AGENTS.md)** for every agent and
+what it does.
 
 ---
 
@@ -127,8 +165,18 @@ See **[docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)** for a full folder
 Run the contracts test suite (no Docker required):
 
 ```bash
-python -m venv .venv-contracts && .venv-contracts/Scripts/pip install -e packages/contracts pytest
+python -m venv .venv-contracts
+.venv-contracts/Scripts/pip install -e packages/contracts pytest   # Windows
 .venv-contracts/Scripts/python -m pytest packages/contracts/tests -v
+```
+
+Run API unit tests (requires `pip install -e packages/contracts` and
+service dependencies in your venv):
+
+```bash
+cd services/api
+pip install -r requirements.txt
+python -m pytest tests/test_planning.py tests/test_thesis_framework.py tests/test_safety.py -v
 ```
 
 Run the evaluation harness (API must be running):
@@ -140,47 +188,32 @@ python evaluation/run_consistency.py --ticker NVDA --runs 2
 
 ---
 
-## Build status
-
-Built incrementally; each milestone ends compiling, tested, and committed.
-
-| Milestone | Scope | Status |
-|---|---|---|
-| **M0** | Service skeletons, contracts, Docker, dependency isolation proof | ✅ |
-| M1 | Company validation + HITL #1 + checkpointing | ✅ |
-| M2 | Planner → Director → one specialist over real A2A (vertical slice) | ✅ |
-| M3 | Full specialist fleet + parallel fan-out + retry/fallback | ✅ |
-| M4 | Evidence repository + versioned living thesis | ✅ |
-| M5 | Safety pipeline + `INSUFFICIENT_EVIDENCE` path | ✅ |
-| M6 | CrewAI investment committee | ✅ |
-| M7 | HITL #2 + replan loop | ✅ |
-| M8 | PDF report generation | ✅ |
-| M9 | Frontend | ✅ |
-| M10 | LangSmith cross-service tracing + evaluation harness | ✅ |
-
----
-
 ## Documentation
 
-- **[docs/GUARDRAILS.md](docs/GUARDRAILS.md)** — guardrails, validation layers, error handling, multi-agent patterns.
-- **[docs/AGENTS.md](docs/AGENTS.md)** — complete list of agents, capabilities, and code files.
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** — system design, framework
-  justification, data flow, tradeoffs, and technical analysis.
-- **[docs/RUBRIC_ALIGNMENT.md](docs/RUBRIC_ALIGNMENT.md)** — maps course
-  requirements and 500-point rubric to this repository.
-- **[docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md)** — 10-minute presentation
-  and demo script (includes required failure scenario).
+| Doc | Contents |
+|---|---|
+| [docs/AGENTS.md](docs/AGENTS.md) | Complete agent list, capabilities, and file paths |
+| [docs/GUARDRAILS.md](docs/GUARDRAILS.md) | Validation layers, error handling, multi-agent patterns |
+| [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) | Folder map and navigation guide |
+| [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | 10-minute presentation and live demo script |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System design, framework justification, tradeoffs |
 
 ---
 
-## Submission checklist
+## Demo & submission
+
+For a live presentation, run `docker compose up --build` on your machine and
+**share your screen** while navigating to http://localhost:3000. The app
+runs locally — reviewers cannot open your `localhost` from their own computer
+unless you deploy it or use a tunnel.
 
 | Item | Status |
 |---|---|
-| GitHub repository | ✅ |
+| GitHub repository | ✅ https://github.com/soniamannlehl-cloud/finalproject |
 | `ARCHITECTURE.md` in repo root | ✅ |
 | `README.md` with setup instructions | ✅ |
-| Demo video (≤10 min) | ⬜ **Record and add link below** |
+| Web UI (`frontend/`) | ✅ |
+| Demo video (≤10 min) | ⬜ Record and add link below |
 | Instructor has repo access | ⬜ Grant collaborator if private |
 
 ### Demo Video
@@ -189,3 +222,7 @@ Built incrementally; each milestone ends compiling, tested, and committed.
 `[Add your demo video link here]`
 
 ---
+
+## License
+
+See [LICENSE](LICENSE).
